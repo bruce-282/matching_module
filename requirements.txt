@@ -1,0 +1,25 @@
+
+torch
+torchvision
+torchaudio
+numpy==1.26.3
+opencv-python
+Pillow>=8.0.0
+
+# Deep learning dependencies
+einops
+kornia
+
+# Image processing and computer vision
+scipy
+scikit-image
+
+# Data handling
+h5py
+tqdm
+
+# Utilities
+matplotlib<3.9
+seaborn
+
+huggingface_hub

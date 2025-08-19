@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "matching-module"
+version = "0.1.0"
+description = "Image matching module using Roma model"
+
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+maintainers = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+
+requires-python = ">=3.9,<3.12"
+license = {file = "LICENSE"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["matchers*", "datasets*", "third_party*", "utils*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.py", "*.pth", "*.ckpt"]
+
+[project.scripts]
+roma-match = "core.matchers.roma:main"
+
+# PyTorch CUDA 설치를 위한 post-install 스크립트
+[tool.setuptools.cmdclass]
+develop = "setuptools.command.develop:develop"
+install = "setuptools.command.install:install"
+
+
+[tool.coverage.run]
+source = ["matchers", "utils"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/env/*",
+]
+
