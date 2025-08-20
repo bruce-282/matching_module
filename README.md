@@ -154,9 +154,8 @@ transformed_points:
 ## 문제 해결
 
 ### 일반적인 오류
-1. **CUDA 메모리 부족**: `--max_keypoints` 값을 줄여보세요
-2. **매칭 실패**: 이미지 품질이나 특징점이 부족할 수 있습니다
-3. **RANSAC 실패**: `--ransac_reproj_threshold` 값을 조정해보세요
+1. **매칭 실패**: 이미지 품질이나 특징점이 부족할 수 있습니다
+2. **RANSAC 실패**: `--ransac_reproj_threshold` 값을 조정해보세요
 
 ### 성능 최적화
 - GPU 사용 시 더 빠른 처리 속도
