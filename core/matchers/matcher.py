@@ -409,6 +409,7 @@ class Matcher:
                 confidence_threshold=self.config["confidence_threshold"],
             )
 
+            # 디버그 모드에서만 이미지 변환 및 시각화
             if ransac_result["homography"] is not None and self.config["debug_mode"]:
                 logger.debug("이미지 변환 결과 생성...")
                 img0 = cv2.imread(str(image0_path))
@@ -441,6 +442,72 @@ class Matcher:
                         logger.warning("이미지 변환 실패")
                 else:
                     logger.error("이미지 로드 실패")
+
+    def calculate_points(
+        self,
+        image0_path: str,
+        image1_path: str,
+        ransac_result: Dict[str, Any],
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """
+        RANSAC 결과를 바탕으로 포인트 위치를 계산
+
+        Args:
+            image0_path: 첫 번째 이미지 경로
+            image1_path: 두 번째 이미지 경로
+            ransac_result: RANSAC 필터링 결과
+
+        Returns:
+            계산된 포인트 좌표 (x1, y1, x2, y2) 또는 None
+        """
+        if ransac_result["homography"] is not None:
+            img0 = cv2.imread(str(image0_path))
+            img1 = cv2.imread(str(image1_path))
+
+            if img0 is not None and img1 is not None:
+                # 포인트 위치 계산을 위한 간단한 변환
+                h0, w0, _ = img0.shape
+                h1, w1, _ = img1.shape
+                H = np.array(ransac_result["geom_info"]["Homography"])
+                H_inv = np.linalg.inv(H)
+
+                # 포인트 변환 계산
+                offset_point1_coords = np.array(
+                    [
+                        [
+                            w1 * self.config["offset_point1"][0],
+                            h1 * self.config["offset_point1"][1],
+                            1,
+                        ]
+                    ],
+                    dtype=np.float32,
+                )
+                transformed_point = H_inv @ offset_point1_coords.T
+                transformed_point = transformed_point / transformed_point[2]
+
+                offset_point2_coords = np.array(
+                    [
+                        [
+                            w1 * self.config["offset_point2"][0],
+                            h1 * self.config["offset_point2"][1],
+                            1,
+                        ]
+                    ],
+                    dtype=np.float32,
+                )
+                transformed_point_2 = H_inv @ offset_point2_coords.T
+                transformed_point_2 = transformed_point_2 / transformed_point_2[2]
+
+                x1, y1 = int(transformed_point[0][0]), int(transformed_point[1][0])
+                x2, y2 = int(transformed_point_2[0][0]), int(transformed_point_2[1][0])
+
+                return x1, y1, x2, y2
+            else:
+                logger.error("이미지 로드 실패")
+                return None
+        else:
+            logger.warning("Homography가 계산되지 않아 포인트를 계산할 수 없습니다.")
+            return None
 
     def run_pipeline(
         self,
@@ -480,7 +547,26 @@ class Matcher:
             # 2. RANSAC 필터링
             ransac_result = self.run_ransac_filtering(matches_result)
 
-            # 3. 결과 시각화
+            # 3. 포인트 계산 및 YAML 파일 저장 (RANSAC 성공 시)
+            if ransac_result is not None:
+                output_path = Path(output_dir)
+                output_path.mkdir(exist_ok=True)
+
+                # 포인트 계산
+                points = self.calculate_points(image0_path, image1_path, ransac_result)
+
+                # YAML 파일 저장
+                if points is not None:
+                    x1, y1, x2, y2 = points
+                    img0 = cv2.imread(str(image0_path))
+                    from core.utils.processing_utils import save_points_to_yaml
+
+                    save_points_to_yaml(
+                        str(image0_path), img0, x1, y1, x2, y2, output_path
+                    )
+                    logger.info(f"포인트 위치가 YAML 파일로 저장되었습니다.")
+
+            # 4. 결과 시각화
             self.visualize_results(
                 image0_path, image1_path, matches_result, ransac_result, output_dir
             )

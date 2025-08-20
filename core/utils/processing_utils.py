@@ -467,9 +467,6 @@ def wrap_images(
                         overlapped_image, (x2, y2), point_radius, (255, 0, 0), -1
                     )  # 빨간색 원
 
-                if image_name is not None:
-                    save_points_to_yaml(image_name, img0, x1, y1, x2, y2, output_path)
-
                 # Add red tint to overlapping areas for better visibility
                 # Create a red overlay for overlapping regions
                 red_overlay = np.zeros_like(overlapped_image)
