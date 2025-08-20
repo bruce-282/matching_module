@@ -10,6 +10,10 @@ import cv2
 
 
 def read_image(path, grayscale=False):
+    """이미지 또는 PLY 파일을 읽어서 numpy 배열로 반환합니다."""
+    path = Path(path)
+
+    # 일반 이미지 파일
     if grayscale:
         mode = cv2.IMREAD_GRAYSCALE
     else:

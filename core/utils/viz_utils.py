@@ -5,32 +5,33 @@
 import cv2
 import numpy as np
 from pathlib import Path
+from typing import Tuple
 
 
 def visualize_matches(
-    image0_path,
-    image1_path,
+    image0_origin: np.ndarray,
+    image1_origin: np.ndarray,
     keypoints0,
     keypoints1,
     confidence,
-    output_path="matches_visualization.png",
-    confidence_threshold=0.5,
-    circle_radius=5,
-    line_thickness=1,
-    circle_color=(0, 255, 0),  # 녹색
-    line_color=(255, 0, 0),  # 파란색
+    output_path: Path,
+    confidence_threshold: float = 0.5,
+    circle_radius: int = 5,
+    line_thickness: int = 1,
+    circle_color: Tuple[int, int, int] = (0, 255, 0),  # 녹색
+    line_color: Tuple[int, int, int] = (255, 0, 0),  # 파란색
 ):
     """매칭 결과를 시각화합니다."""
     # 이미지 로드
-    img0 = cv2.imread(str(image0_path))
-    img1 = cv2.imread(str(image1_path))
 
-    if img0 is None or img1 is None:
-        raise ValueError(f"이미지를 로드할 수 없습니다: {image0_path}, {image1_path}")
+    if image0_origin is None or image1_origin is None:
+        raise ValueError(
+            f"이미지를 로드할 수 없습니다: {image0_origin}, {image1_origin}"
+        )
 
     # BGR to RGB 변환
-    img0_rgb = cv2.cvtColor(img0, cv2.COLOR_BGR2RGB)
-    img1_rgb = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
+    img0_rgb = cv2.cvtColor(image0_origin, cv2.COLOR_BGR2RGB)
+    img1_rgb = cv2.cvtColor(image1_origin, cv2.COLOR_BGR2RGB)
 
     # 이미지 크기 조정 (높이 맞춤)
     h0, w0 = img0_rgb.shape[:2]
@@ -108,14 +109,14 @@ def visualize_keypoints(
 
 
 def create_matching_animation(
-    image0_path,
-    image1_path,
+    image0_origin: np.ndarray,
+    image1_origin: np.ndarray,
     keypoints0,
     keypoints1,
     confidence,
-    output_path="matching_animation.gif",
-    confidence_threshold=0.5,
-    fps=10,
+    output_path: Path,
+    confidence_threshold: float = 0.5,
+    fps: int = 10,
 ):
     """매칭 애니메이션을 생성합니다."""
     # 이 기능은 추가 라이브러리가 필요할 수 있습니다
@@ -123,8 +124,8 @@ def create_matching_animation(
     print("현재는 정적 이미지로 시각화합니다.")
 
     return visualize_matches(
-        image0_path,
-        image1_path,
+        image0_origin,
+        image1_origin,
         keypoints0,
         keypoints1,
         confidence,

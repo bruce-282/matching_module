@@ -33,9 +33,10 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from core.matchers.roma import Roma
-from core.utils.image_utils import load_image, resize_image, read_image
+from core.utils.image_utils import resize_image, read_image
 from core.utils.viz_utils import visualize_matches
-from core.utils.processing_utils import filter_matches, compute_geometry, wrap_images
+from core.utils.processing_utils import filter_matches, wrap_images
+from core.utils.pcd_utils import get_image_from_file
 
 
 class Matcher:
@@ -188,8 +189,8 @@ class Matcher:
 
     def run_roma_matching(
         self,
-        image0_path: Optional[str] = None,
-        image1_path: Optional[str] = None,
+        image0_origin: np.ndarray,
+        image1_origin: np.ndarray,
         max_keypoints: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
@@ -204,15 +205,6 @@ class Matcher:
             매칭 결과 딕셔너리
         """
         logger.debug("=== Roma 매칭 시작 ===")
-
-        # 경로 설정
-        image0_path = image0_path or self.config["image0_path"]
-        image1_path = image1_path or self.config["image1_path"]
-        max_keypoints = max_keypoints or self.config["max_keypoints"]
-
-        # 이미지 로드
-        image0_origin = read_image(image0_path)
-        image1_origin = read_image(image1_path)
 
         # 전처리
         image0, scale0 = self.preprocess(
@@ -359,8 +351,9 @@ class Matcher:
 
     def visualize_results(
         self,
-        image0_path: str,
-        image1_path: str,
+        image0_origin: np.ndarray,
+        image1_origin: np.ndarray,
+        image_path: Path,
         matches_result: Dict[str, Any],
         ransac_result: Optional[Dict[str, Any]],
         output_dir: Optional[str] = None,
@@ -381,13 +374,14 @@ class Matcher:
         output_path = Path(output_dir)
         output_path.mkdir(exist_ok=True)
 
+        image0_name = Path(image_path).stem
         # 1. 원본 Roma 매칭 결과 시각화 (디버그 모드에서만)
         if self.config["debug_mode"]:
             logger.debug("원본 Roma 매칭 결과 시각화...")
-            image0_name = Path(image0_path).stem
+
             visualize_matches(
-                image0_path,
-                image1_path,
+                image0_origin,
+                image1_origin,
                 matches_result["keypoints0"],
                 matches_result["keypoints1"],
                 matches_result["confidence"],
@@ -398,10 +392,9 @@ class Matcher:
         # 2. RANSAC 필터링 후 결과 시각화 (디버그 모드에서만)
         if ransac_result and self.config["debug_mode"]:
             logger.debug("RANSAC 필터링 후 결과 시각화...")
-            image0_name = Path(image0_path).stem
             visualize_matches(
-                image0_path,
-                image1_path,
+                image0_origin,
+                image1_origin,
                 ransac_result["filtered_kpts0"],
                 ransac_result["filtered_kpts1"],
                 ransac_result["filtered_conf"],
@@ -412,8 +405,8 @@ class Matcher:
             # 디버그 모드에서만 이미지 변환 및 시각화
             if ransac_result["homography"] is not None and self.config["debug_mode"]:
                 logger.debug("이미지 변환 결과 생성...")
-                img0 = cv2.imread(str(image0_path))
-                img1 = cv2.imread(str(image1_path))
+                img0 = image0_origin
+                img1 = image1_origin
 
                 if img0 is not None and img1 is not None:
                     # 이미지 변환 및 오버레이
@@ -422,11 +415,9 @@ class Matcher:
                         img1,
                         ransac_result["geom_info"],
                         "Homography",
-                        image_name=str(image0_path),
                         offset_point1=self.config["offset_point1"],
                         offset_point2=self.config["offset_point2"],
                         point_radius=self.config["point_radius"],
-                        output_path=output_path,
                     )
 
                     if warp_result[0] is not None:
@@ -445,8 +436,8 @@ class Matcher:
 
     def calculate_points(
         self,
-        image0_path: str,
-        image1_path: str,
+        image0_origin: np.ndarray,
+        image1_origin: np.ndarray,
         ransac_result: Dict[str, Any],
     ) -> Optional[Tuple[int, int, int, int]]:
         """
@@ -461,8 +452,8 @@ class Matcher:
             계산된 포인트 좌표 (x1, y1, x2, y2) 또는 None
         """
         if ransac_result["homography"] is not None:
-            img0 = cv2.imread(str(image0_path))
-            img1 = cv2.imread(str(image1_path))
+            img0 = image0_origin
+            img1 = image1_origin
 
             if img0 is not None and img1 is not None:
                 # 포인트 위치 계산을 위한 간단한 변환
@@ -542,7 +533,28 @@ class Matcher:
 
         try:
             # 1. Roma 매칭
-            matches_result = self.run_roma_matching(image0_path, image1_path)
+            # 경로 설정
+
+            # 이미지 로드
+            # PLY 파일인지 확인
+            if Path(image0_path).suffix.lower() == ".ply":
+
+                image0_origin = get_image_from_file(
+                    image0_path, width=2064, height=1544
+                )
+            else:
+                image0_origin = read_image(image0_path)
+
+            if Path(image1_path).suffix.lower() == ".ply":
+                image1_origin = get_image_from_file(
+                    image1_path, width=2064, height=1544
+                )
+            else:
+                image1_origin = read_image(image1_path)
+
+            matches_result = self.run_roma_matching(
+                image0_origin, image1_origin, self.config["max_keypoints"]
+            )
 
             # 2. RANSAC 필터링
             ransac_result = self.run_ransac_filtering(matches_result)
@@ -553,22 +565,34 @@ class Matcher:
                 output_path.mkdir(exist_ok=True)
 
                 # 포인트 계산
-                points = self.calculate_points(image0_path, image1_path, ransac_result)
+                points = self.calculate_points(
+                    image0_origin, image1_origin, ransac_result
+                )
 
                 # YAML 파일 저장
                 if points is not None:
                     x1, y1, x2, y2 = points
-                    img0 = cv2.imread(str(image0_path))
                     from core.utils.processing_utils import save_points_to_yaml
 
                     save_points_to_yaml(
-                        str(image0_path), img0, x1, y1, x2, y2, output_path
+                        Path(image0_path),
+                        image0_origin.shape[:2],
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        output_path,
                     )
                     logger.info(f"포인트 위치가 YAML 파일로 저장되었습니다.")
 
             # 4. 결과 시각화
             self.visualize_results(
-                image0_path, image1_path, matches_result, ransac_result, output_dir
+                image0_origin,
+                image1_origin,
+                Path(image0_path),
+                matches_result,
+                ransac_result,
+                output_dir,
             )
 
             # 전체 시간 요약

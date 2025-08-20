@@ -18,6 +18,9 @@ scikit-image
 h5py
 tqdm
 
+# Point cloud processing
+open3d
+
 # Utilities
 matplotlib<3.9
 seaborn

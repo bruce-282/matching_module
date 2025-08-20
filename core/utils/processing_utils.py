@@ -297,8 +297,8 @@ def compute_geometry(
 
 
 def save_points_to_yaml(
-    image_name: str,
-    img0: np.ndarray,
+    image_path: Path,
+    image_size: Tuple[int, int],
     x1: int,
     y1: int,
     x2: int,
@@ -308,20 +308,19 @@ def save_points_to_yaml(
     """포인트 위치를 YAML 파일로 저장합니다."""
 
     # source 이미지 이름으로 yaml 파일 생성
-    source_path = Path(image_name)
-    yaml_filename = f"{source_path.stem}_result.yaml"
+    yaml_filename = f"{image_path.stem}_result.yaml"
 
     if output_path is not None:
         yaml_path = output_path / yaml_filename
     else:
-        yaml_path = source_path.parent / yaml_filename
+        yaml_path = image_path.parent / yaml_filename
 
     # YAML 데이터 구조
     points_data = {
-        "source_image": source_path.name,
+        "source_image": image_path.name,
         "image_size": {
-            "width": int(img0.shape[1]),
-            "height": int(img0.shape[0]),
+            "width": int(image_size[1]),
+            "height": int(image_size[0]),
         },
         "transformed_points": {
             "pointL": {"x": int(x1), "y": int(y1)},
@@ -346,11 +345,9 @@ def wrap_images(
     img1: np.ndarray,
     geo_info: Optional[Dict[str, List[float]]],
     geom_type: str,
-    image_name: Optional[str] = None,
     offset_point1: Tuple[float, float] = (0.5, 0.92),
     offset_point2: Tuple[float, float] = (1.4, 0.92),
     point_radius: int = 10,
-    output_path: Optional[Path] = None,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
     Wraps the images based on the geometric transformation used to align them.
