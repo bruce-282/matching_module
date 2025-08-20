@@ -21,6 +21,13 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
 # 로거 설정
 logger = logging.getLogger(__name__)
 
+# 이미지 변환 관련 상수들
+DEFAULT_OFFSET_POINT1_X_RATIO = 0.5  # 이미지 너비의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINT1_Y_RATIO = 0.92  # 이미지 높이의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINT2_X_RATIO = 1.4  # 이미지 너비의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINT2_Y_RATIO = 0.92  # 이미지 높이의 비율 (0.0 ~ 1.0)
+DEFAULT_POINT_RADIUS = 10  # 포인트 반지름
+
 # 프로젝트 루트를 Python 경로에 추가
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -71,6 +78,16 @@ class Matcher:
             "enable_ransac": True,
             # 디버그 모드
             "debug_mode": False,
+            # 이미지 변환 포인트 설정
+            "offset_point1": (
+                DEFAULT_OFFSET_POINT1_X_RATIO,
+                DEFAULT_OFFSET_POINT1_Y_RATIO,
+            ),
+            "offset_point2": (
+                DEFAULT_OFFSET_POINT2_X_RATIO,
+                DEFAULT_OFFSET_POINT2_Y_RATIO,
+            ),
+            "point_radius": DEFAULT_POINT_RADIUS,
         }
 
         # 사용자 설정으로 기본 설정 업데이트
@@ -403,6 +420,9 @@ class Matcher:
                         ransac_result["geom_info"],
                         "Homography",
                         image_name=str(image0_path),
+                        offset_point1=self.config["offset_point1"],
+                        offset_point2=self.config["offset_point2"],
+                        point_radius=self.config["point_radius"],
                     )
 
                     if warp_result[0] is not None:

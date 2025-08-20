@@ -15,14 +15,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_MIN_NUM_MATCHES = 4
 
 
-# 이미지 변환 관련 상수들
-DEFAULT_OFFSET_POINT1_X_RATIO = 0.5  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINT1_Y_RATIO = 0.92  # 이미지 높이의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINT2_X_RATIO = 1.4  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINT2_Y_RATIO = 0.92  # 이미지 높이의 비율 (0.0 ~ 1.0)
-DEFAULT_POINT_RADIUS = 10  # 포인트 반지름
-
-
 # RANSAC 메서드 매핑
 ransac_zoo = {
     "CV2_RANSAC": cv2.RANSAC,
@@ -352,7 +344,10 @@ def wrap_images(
     geo_info: Optional[Dict[str, List[float]]],
     geom_type: str,
     image_name: Optional[str] = None,
-) -> Tuple[Optional[str], Optional[Dict[str, List[float]]]]:
+    offset_point1: Tuple[float, float] = (0.5, 0.92),
+    offset_point2: Tuple[float, float] = (1.4, 0.92),
+    point_radius: int = 10,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
     Wraps the images based on the geometric transformation used to align them.
 
@@ -382,33 +377,33 @@ def wrap_images(
             rectified_image1 = cv2.warpPerspective(img1, H_inv, (w0, h0))
 
             # Apply H_inv transformation to 2D points using user-defined ratios
-            offset_point1 = np.array(
+            offset_point1_coords = np.array(
                 [
                     [
-                        w1 * DEFAULT_OFFSET_POINT1_X_RATIO,
-                        h1 * DEFAULT_OFFSET_POINT1_Y_RATIO,
+                        w1 * offset_point1[0],
+                        h1 * offset_point1[1],
                         1,
                     ]
                 ],
                 dtype=np.float32,
             )  # Homogeneous coordinates for first point
 
-            transformed_point = H_inv @ offset_point1.T
+            transformed_point = H_inv @ offset_point1_coords.T
             transformed_point = (
                 transformed_point / transformed_point[2]
             )  # Normalize homogeneous coordinates
 
-            offset_point2 = np.array(
+            offset_point2_coords = np.array(
                 [
                     [
-                        w1 * DEFAULT_OFFSET_POINT2_X_RATIO,
-                        h1 * DEFAULT_OFFSET_POINT2_Y_RATIO,
+                        w1 * offset_point2[0],
+                        h1 * offset_point2[1],
                         1,
                     ]
                 ],
                 dtype=np.float32,
             )
-            transformed_point_2 = H_inv @ offset_point2.T
+            transformed_point_2 = H_inv @ offset_point2_coords.T
             transformed_point_2 = (
                 transformed_point_2 / transformed_point_2[2]
             )  # Normalize homogeneous coordinates
@@ -446,7 +441,7 @@ def wrap_images(
                 )
 
                 # Add red circles for the transformed points
-                point_radius = DEFAULT_POINT_RADIUS  # 포인트 반지름 설정
+                # 포인트 반지름 설정
 
                 # Draw red circle for first transformed point
                 x1, y1 = int(transformed_point[0][0]), int(transformed_point[1][0])

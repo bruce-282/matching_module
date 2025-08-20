@@ -69,6 +69,36 @@ def main():
         action="store_true",
         help="디버그 모드 활성화 (파일 저장)",
     )
+    parser.add_argument(
+        "--offset_point1_x",
+        type=float,
+        default=0.5,
+        help="첫 번째 포인트 X 좌표 비율 (0.0 ~ 1.0)",
+    )
+    parser.add_argument(
+        "--offset_point1_y",
+        type=float,
+        default=0.92,
+        help="첫 번째 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
+    )
+    parser.add_argument(
+        "--offset_point2_x",
+        type=float,
+        default=1.4,
+        help="두 번째 포인트 X 좌표 비율 (0.0 ~ 1.0)",
+    )
+    parser.add_argument(
+        "--offset_point2_y",
+        type=float,
+        default=0.92,
+        help="두 번째 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
+    )
+    parser.add_argument(
+        "--point_radius",
+        type=int,
+        default=10,
+        help="포인트 반지름",
+    )
 
     args = parser.parse_args()
 
@@ -88,6 +118,9 @@ def main():
         "ransac_reproj_threshold": args.ransac_reproj_threshold,
         "ransac_confidence": args.ransac_confidence,
         "debug_mode": args.debug,
+        "offset_point1": (args.offset_point1_x, args.offset_point1_y),
+        "offset_point2": (args.offset_point2_x, args.offset_point2_y),
+        "point_radius": args.point_radius,
     }
 
     # Matcher 인스턴스 생성
