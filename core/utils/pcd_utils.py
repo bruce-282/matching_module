@@ -97,6 +97,7 @@ def load_ply_as_image(
         raise FileNotFoundError(f"PLY 파일을 찾을 수 없습니다: {ply_path}")
 
     # 기본 카메라 내부 파라미터 (표준 카메라)
+
     if intrinsic_matrix is None:
         intrinsic_matrix = np.array(
             [[width, 0, width / 2], [0, height, height / 2], [0, 0, 1]]

@@ -304,6 +304,8 @@ def save_points_to_yaml(
     x2: int,
     y2: int,
     output_path: Optional[Path] = None,
+    point1_3d: Optional[np.ndarray] = None,
+    point2_3d: Optional[np.ndarray] = None,
 ) -> None:
     """포인트 위치를 YAML 파일로 저장합니다."""
 
@@ -327,6 +329,21 @@ def save_points_to_yaml(
             "pointR": {"x": int(x2), "y": int(y2)},
         },
     }
+
+    # 3D 정보가 있는 경우 추가
+    if point1_3d is not None and point2_3d is not None:
+        points_data["transformed_points_3d"] = {
+            "pointL": {
+                "x": float(point1_3d[0]),
+                "y": float(point1_3d[1]),
+                "z": float(point1_3d[2]),
+            },
+            "pointR": {
+                "x": float(point2_3d[0]),
+                "y": float(point2_3d[1]),
+                "z": float(point2_3d[2]),
+            },
+        }
 
     with open(yaml_path, "w", encoding="utf-8") as f:
         yaml.dump(

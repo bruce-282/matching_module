@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_OFFSET_POINT1_X_RATIO = 0.5  # 이미지 너비의 비율 (0.0 ~ 1.0)
 DEFAULT_OFFSET_POINT1_Y_RATIO = 0.92  # 이미지 높이의 비율 (0.0 ~ 1.0)
 DEFAULT_OFFSET_POINT2_X_RATIO = 1.4  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINT2_Y_RATIO = 0.92  # 이미지 높이의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINT2_Y_RATIO = 0.94  # 이미지 높이의 비율 (0.0 ~ 1.0)
 DEFAULT_POINT_RADIUS = 10  # 포인트 반지름
 
 # 프로젝트 루트를 Python 경로에 추가
@@ -35,8 +35,13 @@ sys.path.insert(0, str(project_root))
 from core.matchers.roma import Roma
 from core.utils.image_utils import resize_image, read_image
 from core.utils.viz_utils import visualize_matches
-from core.utils.processing_utils import filter_matches, wrap_images
+from core.utils.processing_utils import filter_matches, wrap_images, save_points_to_yaml
 from core.utils.pcd_utils import get_image_from_file
+from core.utils import (
+    is_ply_file,
+    point_cloud_to_depth_map,
+    find_3d_from_2d_depthmap_robust,
+)
 
 
 class Matcher:
@@ -439,17 +444,17 @@ class Matcher:
         image0_origin: np.ndarray,
         image1_origin: np.ndarray,
         ransac_result: Dict[str, Any],
-    ) -> Optional[Tuple[int, int, int, int]]:
+    ) -> Optional[Tuple[int, int, int, int, np.ndarray, np.ndarray]]:
         """
         RANSAC 결과를 바탕으로 포인트 위치를 계산
 
         Args:
-            image0_path: 첫 번째 이미지 경로
-            image1_path: 두 번째 이미지 경로
+            image0_origin: 첫 번째 이미지 (numpy array)
+            image1_origin: 두 번째 이미지 (numpy array)
             ransac_result: RANSAC 필터링 결과
 
         Returns:
-            계산된 포인트 좌표 (x1, y1, x2, y2) 또는 None
+            계산된 포인트 좌표 (x1, y1, x2, y2, point1_2d, point2_2d) 또는 None
         """
         if ransac_result["homography"] is not None:
             img0 = image0_origin
@@ -492,7 +497,11 @@ class Matcher:
                 x1, y1 = int(transformed_point[0][0]), int(transformed_point[1][0])
                 x2, y2 = int(transformed_point_2[0][0]), int(transformed_point_2[1][0])
 
-                return x1, y1, x2, y2
+                # 2D 포인트 정보 (원본 좌표계)
+                point1_2d = np.array([x1, y1])
+                point2_2d = np.array([x2, y2])
+
+                return x1, y1, x2, y2, point1_2d, point2_2d
             else:
                 logger.error("이미지 로드 실패")
                 return None
@@ -500,10 +509,82 @@ class Matcher:
             logger.warning("Homography가 계산되지 않아 포인트를 계산할 수 없습니다.")
             return None
 
+    def calculate_depth(
+        self,
+        target_image_path: str,
+        point1_2d: np.ndarray,
+        point2_2d: np.ndarray,
+        radius: int = 10,
+    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """
+        2D 포인트에서 3D 포인트 정보를 계산 (PLY 파일인 경우에만)
+
+        Args:
+            target_image_path: 첫 번째 이미지 경로
+            point1_2d: 첫 번째 2D 포인트 [x, y]
+            point2_2d: 두 번째 2D 포인트 [x, y]
+            radius: 주변 픽셀 반지름 (기본값: 3)
+
+        Returns:
+            3D 포인트 정보 (point1_3d, point2_3d) 또는 None
+        """
+        from pathlib import Path
+
+        target_image_path = Path(target_image_path)
+
+        # PLY 파일이 아닌 경우 None 반환
+        if not is_ply_file(str(target_image_path)):
+            logger.debug("PLY 파일이 아니므로 3D 정보를 계산하지 않습니다.")
+            return None
+
+        try:
+            import open3d as o3d
+
+            # PLY 파일 로드
+            logger.debug(f"PLY 파일에서 3D 정보를 추출하는 중: {target_image_path}")
+            pcd = o3d.io.read_point_cloud(str(target_image_path))
+
+            if not pcd.has_points():
+                logger.warning("PLY 파일에 포인트가 없습니다.")
+                return None
+
+            points = np.asarray(pcd.points)
+            colors = np.asarray(pcd.colors) if pcd.has_colors() else None
+
+            # 포인트 클라우드를 depth map으로 변환
+            depth_image, intrinsic = point_cloud_to_depth_map(points, colors)
+
+            if depth_image is None:
+                logger.error("Depth map 생성에 실패했습니다.")
+                return None
+
+            # 2D 포인트를 정수 좌표로 변환
+            u1, v1 = int(point1_2d[0]), int(point1_2d[1])
+            u2, v2 = int(point2_2d[0]), int(point2_2d[1])
+
+            # 3D 포인트 계산 (주변 픽셀 평균 사용)
+            point1_3d = find_3d_from_2d_depthmap_robust(
+                depth_image, intrinsic, (u1, v1), radius
+            )
+            point2_3d = find_3d_from_2d_depthmap_robust(
+                depth_image, intrinsic, (u2, v2), radius
+            )
+
+            if point1_3d is not None and point2_3d is not None:
+                logger.info(f"3D 포인트 계산 완료: {point1_3d}, {point2_3d}")
+                return point1_3d, point2_3d
+            else:
+                logger.warning("3D 포인트 계산에 실패했습니다.")
+                return None
+
+        except Exception as e:
+            logger.error(f"3D 포인트 계산 중 오류 발생: {e}")
+            return None
+
     def run_pipeline(
         self,
-        image0_path: Optional[str] = None,
-        image1_path: Optional[str] = None,
+        target_image_path: Optional[str] = None,
+        source_image_path: Optional[str] = None,
         output_dir: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
         """
@@ -518,13 +599,13 @@ class Matcher:
             Roma 매칭 결과와 RANSAC 필터링 결과
         """
         # 경로 설정
-        image0_path = image0_path or self.config["image0_path"]
-        image1_path = image1_path or self.config["image1_path"]
+        target_image_path = target_image_path or self.config["target_image_path"]
+        source_image_path = source_image_path or self.config["source_image_path"]
         output_dir = output_dir or self.config["output_dir"]
 
         logger.debug("=== Roma 매칭 + RANSAC 필터링 시작 ===")
-        logger.debug(f"이미지0: {image0_path}")
-        logger.debug(f"이미지1: {image1_path}")
+        logger.debug(f"이미지0: {target_image_path}")
+        logger.debug(f"이미지1: {source_image_path}")
         logger.debug(f"출력 디렉토리: {output_dir}")
         logger.debug(f"최대 키포인트: {self.config['max_keypoints']}")
         logger.debug(f"RANSAC 재투영 임계값: {self.config['ransac_reproj_threshold']}")
@@ -535,25 +616,16 @@ class Matcher:
             # 1. Roma 매칭
             # 경로 설정
 
-            # 이미지 로드
-            # PLY 파일인지 확인
-            if Path(image0_path).suffix.lower() == ".ply":
+            target_image_origin = get_image_from_file(
+                target_image_path, width=2064, height=1544
+            )
 
-                image0_origin = get_image_from_file(
-                    image0_path, width=2064, height=1544
-                )
-            else:
-                image0_origin = read_image(image0_path)
-
-            if Path(image1_path).suffix.lower() == ".ply":
-                image1_origin = get_image_from_file(
-                    image1_path, width=2064, height=1544
-                )
-            else:
-                image1_origin = read_image(image1_path)
+            source_image_origin = get_image_from_file(
+                source_image_path, width=2064, height=1544
+            )
 
             matches_result = self.run_roma_matching(
-                image0_origin, image1_origin, self.config["max_keypoints"]
+                target_image_origin, source_image_origin, self.config["max_keypoints"]
             )
 
             # 2. RANSAC 필터링
@@ -566,30 +638,41 @@ class Matcher:
 
                 # 포인트 계산
                 points = self.calculate_points(
-                    image0_origin, image1_origin, ransac_result
+                    target_image_origin, source_image_origin, ransac_result
                 )
 
                 # YAML 파일 저장
                 if points is not None:
-                    x1, y1, x2, y2 = points
-                    from core.utils.processing_utils import save_points_to_yaml
+                    x1, y1, x2, y2, point1_2d, point2_2d = points
+
+                    # 3D 포인트 계산 (PLY 파일인 경우에만)
+                    point1_3d = None
+                    point2_3d = None
+                    depth_result = self.calculate_depth(
+                        target_image_path, point1_2d, point2_2d
+                    )
+                    if depth_result is not None:
+                        point1_3d, point2_3d = depth_result
+                        logger.info("3D 포인트 정보가 계산되었습니다.")
 
                     save_points_to_yaml(
-                        Path(image0_path),
-                        image0_origin.shape[:2],
+                        Path(target_image_path),
+                        target_image_origin.shape[:2],
                         x1,
                         y1,
                         x2,
                         y2,
                         output_path,
+                        point1_3d,
+                        point2_3d,
                     )
                     logger.info(f"포인트 위치가 YAML 파일로 저장되었습니다.")
 
             # 4. 결과 시각화
             self.visualize_results(
-                image0_origin,
-                image1_origin,
-                Path(image0_path),
+                target_image_origin,
+                source_image_origin,
+                Path(target_image_path),
                 matches_result,
                 ransac_result,
                 output_dir,

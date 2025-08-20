@@ -78,7 +78,7 @@ def main():
     parser.add_argument(
         "--offset_point1_y",
         type=float,
-        default=0.92,
+        default=0.925,
         help="첫 번째 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
@@ -90,7 +90,7 @@ def main():
     parser.add_argument(
         "--offset_point2_y",
         type=float,
-        default=0.92,
+        default=0.937,
         help="두 번째 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
@@ -110,8 +110,8 @@ def main():
 
     # Matcher 설정
     config = {
-        "image0_path": args.target,
-        "image1_path": args.source,
+        "target_image_path": args.target,
+        "source_image_path": args.source,
         "output_dir": args.output_dir,
         "max_keypoints": args.max_keypoints,
         "ransac_method": args.ransac_method,
@@ -127,7 +127,11 @@ def main():
     matcher = Matcher(config)
 
     # 파이프라인 실행
-    matches_result, ransac_result = matcher.run_pipeline()
+    matches_result, ransac_result = matcher.run_pipeline(
+        target_image_path=args.target,
+        source_image_path=args.source,
+        output_dir=args.output_dir,
+    )
 
     if matches_result is not None:
         print("\n=== 실행 완료 ===")

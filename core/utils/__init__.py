@@ -18,6 +18,14 @@ from .pcd_utils import (
     get_image_from_file,
     PointCloudToImageConverter,
 )
+from .depth_utils import (
+    point_cloud_to_depth_map,
+    find_3d_from_2d_depthmap_robust,
+    find_3d_from_2d_depthmap,
+    get_pixels_in_radius,
+    depth_estimation_mad,
+    depth_estimation_histogram,
+)
 
 __all__ = [
     "load_image",
@@ -37,6 +45,12 @@ __all__ = [
     "is_ply_file",
     "get_image_from_file",
     "PointCloudToImageConverter",
+    "point_cloud_to_depth_map",
+    "find_3d_from_2d_depthmap_robust",
+    "find_3d_from_2d_depthmap",
+    "get_pixels_in_radius",
+    "depth_estimation_mad",
+    "depth_estimation_histogram",
 ]
 
 MODEL_REPO_ID = "Realcat/imcui_checkpoints"
