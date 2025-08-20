@@ -26,7 +26,7 @@ class Roma(BaseModel):
         "name": "two_view_pipeline",
         "model_name": "roma_outdoor.pth",
         "model_utils_name": "dinov2_vitl14_pretrain.pth",
-        "max_keypoints": 3000,
+        "max_keypoints": 2000,
         "coarse_res": (560, 560),
         "upsample_res": (864, 1152),
     }
@@ -39,16 +39,39 @@ class Roma(BaseModel):
     def _init(self, conf):
         logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger(__name__)
-        print(self.conf)
-        model_path = self._download_model(
-            repo_id=MODEL_REPO_ID,
-            filename="{}/{}".format(Path(__file__).stem, self.conf["model_name"]),
+
+        # 로컬 모델 파일 경로 확인
+        local_model_path = (
+            Path(__file__).parent.parent.parent
+            / "third_party/RoMa/weights"
+            / self.conf["model_name"]
+        )
+        local_dinov2_path = (
+            Path(__file__).parent.parent.parent
+            / "third_party/RoMa/weights"
+            / self.conf["model_utils_name"]
         )
 
-        dinov2_weights = self._download_model(
-            repo_id=MODEL_REPO_ID,
-            filename="{}/{}".format(Path(__file__).stem, self.conf["model_utils_name"]),
-        )
+        # 로컬 파일이 있으면 사용, 없으면 다운로드
+        if local_model_path.exists():
+            logger.info(f"로컬 모델 파일 사용: {local_model_path}")
+            model_path = str(local_model_path)
+        else:
+            model_path = self._download_model(
+                repo_id=MODEL_REPO_ID,
+                filename="{}/{}".format(Path(__file__).stem, self.conf["model_name"]),
+            )
+
+        if local_dinov2_path.exists():
+            logger.info(f"로컬 DINOv2 파일 사용: {local_dinov2_path}")
+            dinov2_weights = str(local_dinov2_path)
+        else:
+            dinov2_weights = self._download_model(
+                repo_id=MODEL_REPO_ID,
+                filename="{}/{}".format(
+                    Path(__file__).stem, self.conf["model_utils_name"]
+                ),
+            )
         logger.info("Loading Roma model")
         # load the model
         weights = torch.load(model_path, map_location="cpu")

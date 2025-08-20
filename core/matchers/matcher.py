@@ -60,14 +60,14 @@ class Matcher:
             "ransac_method": "CV2_USAC_MAGSAC",
             "ransac_reproj_threshold": 8.0,
             "ransac_confidence": 0.9999,
-            "ransac_max_iter": 10000,
+            "ransac_max_iter": 300000,
             "min_num_matches": 4,
             "geometry_type": "Homography",
             # 시각화 설정
             "confidence_threshold": 0.5,
             # 이미지 resize 설정
-            "resize_width": 320,
-            "resize_height": 240,
+            "resize_width": 640,
+            "resize_height": 480,
             "resize_max": 1024,
             "dfactor": 8,
             # 기타 설정
