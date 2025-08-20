@@ -384,26 +384,28 @@ class Matcher:
         # 1. 원본 Roma 매칭 결과 시각화 (디버그 모드에서만)
         if self.config["debug_mode"]:
             logger.debug("원본 Roma 매칭 결과 시각화...")
+            image0_name = Path(image0_path).stem
             visualize_matches(
                 image0_path,
                 image1_path,
                 matches_result["keypoints0"],
                 matches_result["keypoints1"],
                 matches_result["confidence"],
-                str(output_path / "roma_matches_original.png"),
+                str(output_path / f"{image0_name}_matches_original.png"),
                 confidence_threshold=self.config["confidence_threshold"],
             )
 
         # 2. RANSAC 필터링 후 결과 시각화 (디버그 모드에서만)
         if ransac_result and self.config["debug_mode"]:
             logger.debug("RANSAC 필터링 후 결과 시각화...")
+            image0_name = Path(image0_path).stem
             visualize_matches(
                 image0_path,
                 image1_path,
                 ransac_result["filtered_kpts0"],
                 ransac_result["filtered_kpts1"],
                 ransac_result["filtered_conf"],
-                str(output_path / "roma_matches_ransac_filtered.png"),
+                str(output_path / f"{image0_name}_matches_ransac_filtered.png"),
                 confidence_threshold=self.config["confidence_threshold"],
             )
 
@@ -423,11 +425,14 @@ class Matcher:
                         offset_point1=self.config["offset_point1"],
                         offset_point2=self.config["offset_point2"],
                         point_radius=self.config["point_radius"],
+                        output_path=output_path,
                     )
 
                     if warp_result[0] is not None:
                         # 변환된 이미지를 파일로 저장
-                        output_file = str(output_path / "warped_overlapped.png")
+                        output_file = str(
+                            output_path / f"{image0_name}_warped_overlapped.png"
+                        )
                         cv2.imwrite(
                             output_file, cv2.cvtColor(warp_result[0], cv2.COLOR_RGB2BGR)
                         )

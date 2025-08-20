@@ -4,8 +4,8 @@ RANSAC 유틸리티 함수들
 
 import cv2
 import numpy as np
-import time
-import json
+from pathlib import Path
+import yaml
 import logging
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -303,15 +303,18 @@ def save_points_to_yaml(
     y1: int,
     x2: int,
     y2: int,
+    output_path: Optional[Path] = None,
 ) -> None:
     """포인트 위치를 YAML 파일로 저장합니다."""
-    from pathlib import Path
-    import yaml
 
     # source 이미지 이름으로 yaml 파일 생성
     source_path = Path(image_name)
-    yaml_filename = f"{source_path.stem}.yaml"
-    yaml_path = source_path.parent / yaml_filename
+    yaml_filename = f"{source_path.stem}_result.yaml"
+
+    if output_path is not None:
+        yaml_path = output_path / yaml_filename
+    else:
+        yaml_path = source_path.parent / yaml_filename
 
     # YAML 데이터 구조
     points_data = {
@@ -347,6 +350,7 @@ def wrap_images(
     offset_point1: Tuple[float, float] = (0.5, 0.92),
     offset_point2: Tuple[float, float] = (1.4, 0.92),
     point_radius: int = 10,
+    output_path: Optional[Path] = None,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
     Wraps the images based on the geometric transformation used to align them.
@@ -464,7 +468,7 @@ def wrap_images(
                     )  # 빨간색 원
 
                 if image_name is not None:
-                    save_points_to_yaml(image_name, img0, x1, y1, x2, y2)
+                    save_points_to_yaml(image_name, img0, x1, y1, x2, y2, output_path)
 
                 # Add red tint to overlapping areas for better visibility
                 # Create a red overlay for overlapping regions
