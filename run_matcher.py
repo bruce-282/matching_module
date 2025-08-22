@@ -55,7 +55,7 @@ def main():
     parser.add_argument(
         "--ransac_reproj_threshold",
         type=float,
-        default=8.0,
+        default=10.0,
         help="RANSAC 재투영 임계값",
     )
     parser.add_argument(
@@ -99,6 +99,19 @@ def main():
         default=10,
         help="포인트 반지름",
     )
+    parser.add_argument(
+        "--depth_max",
+        type=float,
+        default=2000.0,
+        help="Depth map 최대 값 (기본값: 2000.0)",
+    )
+    parser.add_argument(
+        "--depth_unit",
+        type=str,
+        default="mm",
+        choices=["m", "mm"],
+        help="Depth map 단위 (기본값: mm)",
+    )
 
     args = parser.parse_args()
 
@@ -121,6 +134,7 @@ def main():
         "offset_point1": (args.offset_point1_x, args.offset_point1_y),
         "offset_point2": (args.offset_point2_x, args.offset_point2_y),
         "point_radius": args.point_radius,
+        "depth_max": args.depth_max,
     }
 
     # Matcher 인스턴스 생성

@@ -70,7 +70,7 @@ class PointCloudToImageConverter:
 
 
 def load_ply_as_image(
-    ply_path: str,
+    ply_path: Path,
     width: int = 1920,
     height: int = 1080,
     intrinsic_matrix: Optional[np.ndarray] = None,
@@ -91,7 +91,6 @@ def load_ply_as_image(
         FileNotFoundError: PLY 파일을 찾을 수 없을 때
         ValueError: 변환 실패 시
     """
-    ply_path = Path(ply_path)
 
     if not ply_path.exists():
         raise FileNotFoundError(f"PLY 파일을 찾을 수 없습니다: {ply_path}")
@@ -146,32 +145,32 @@ def is_ply_file(file_path: str) -> bool:
     return Path(file_path).suffix.lower() == ".ply"
 
 
-def get_image_from_file(
-    file_path: str,
-    width: int = 1920,
-    height: int = 1080,
-    intrinsic_matrix: Optional[np.ndarray] = None,
-) -> np.ndarray:
-    """
-    파일 경로에 따라 적절한 방법으로 이미지를 로드
+# def get_image_from_file(
+#     file_path: str,
+#     width: int = 1920,
+#     height: int = 1080,
+#     intrinsic_matrix: Optional[np.ndarray] = None,
+# ) -> np.ndarray:
+#     """
+#     파일 경로에 따라 적절한 방법으로 이미지를 로드
 
-    Args:
-        file_path: 이미지 또는 PLY 파일 경로
-        width: PLY 변환 시 이미지 너비
-        height: PLY 변환 시 이미지 높이
-        intrinsic_matrix: PLY 변환 시 카메라 내부 파라미터
+#     Args:
+#         file_path: 이미지 또는 PLY 파일 경로
+#         width: PLY 변환 시 이미지 너비
+#         height: PLY 변환 시 이미지 높이
+#         intrinsic_matrix: PLY 변환 시 카메라 내부 파라미터
 
-    Returns:
-        RGB 이미지 (height, width, 3)
-    """
-    file_path = Path(file_path)
+#     Returns:
+#         RGB 이미지 (height, width, 3)
+#     """
+#     file_path = Path(file_path)
 
-    if is_ply_file(str(file_path)):
-        logger.info(f"PLY 파일을 이미지로 변환: {file_path}")
-        return load_ply_as_image(str(file_path), width, height, intrinsic_matrix)
-    else:
-        # 일반 이미지 파일 로드
-        from .image_utils import read_image
+#     if is_ply_file(str(file_path)):
+#         logger.info(f"PLY 파일을 이미지로 변환: {file_path}")
+#         return load_ply_as_image(file_path, width, height, intrinsic_matrix)
+#     else:
+#         # 일반 이미지 파일 로드
+#         from .image_utils import read_image
 
-        logger.info(f"일반 이미지 파일 로드: {file_path}")
-        return read_image(str(file_path))
+#         logger.info(f"일반 이미지 파일 로드: {file_path}")
+#         return read_image(str(file_path))

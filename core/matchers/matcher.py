@@ -36,7 +36,6 @@ from core.matchers.roma import Roma
 from core.utils.image_utils import resize_image, read_image
 from core.utils.viz_utils import visualize_matches
 from core.utils.processing_utils import filter_matches, wrap_images, save_points_to_yaml
-from core.utils.pcd_utils import get_image_from_file
 from core.utils import (
     is_ply_file,
     point_cloud_to_depth_map,
@@ -196,15 +195,13 @@ class Matcher:
         self,
         image0_origin: np.ndarray,
         image1_origin: np.ndarray,
-        max_keypoints: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Roma 모델을 사용하여 이미지 매칭을 수행
 
         Args:
-            image0_path: 첫 번째 이미지 경로
-            image1_path: 두 번째 이미지 경로
-            max_keypoints: 최대 키포인트 수
+            image0_origin: 첫 번째 이미지 (NumPy 배열)
+            image1_origin: 두 번째 이미지 (NumPy 배열)
 
         Returns:
             매칭 결과 딕셔너리
@@ -326,7 +323,7 @@ class Matcher:
             filtered_kpts1 = filtered_pred["mmkeypoints1_orig"]
             filtered_conf = filtered_pred["mmconf"]
 
-            logger.info(f"RANSAC 필터링 완료! (소요시간: {filter_time:.3f}초)")
+        logger.info(f"RANSAC 필터링 완료! (소요시간: {filter_time:.3f}초)")
         logger.debug(f"필터링 후 매칭 수: {len(filtered_kpts0)}")
         logger.debug(
             f"필터링 비율: {len(filtered_kpts0)/len(pred['mkeypoints0_orig'])*100:.1f}%"
@@ -337,8 +334,9 @@ class Matcher:
             logger.debug(f"필터링 후 최고 신뢰도: {np.max(filtered_conf):.3f}")
 
         # Homography 행렬 정보
-        if "H" in filtered_pred:
-            H = filtered_pred["H"]
+        if "geom_info" in filtered_pred:
+            H = filtered_pred["geom_info"]["Homography"]
+            geom_info = filtered_pred["geom_info"]
 
             logger.debug(f"Homography H:\n{H}")
 
@@ -346,8 +344,8 @@ class Matcher:
                 "filtered_kpts0": filtered_kpts0,
                 "filtered_kpts1": filtered_kpts1,
                 "filtered_conf": filtered_conf,
-                "homography": filtered_pred.get("H", None),
-                "geom_info": filtered_pred.get("geom_info", {}),
+                "homography": H,
+                "geom_info": geom_info,
                 "filter_time": filter_time,
             }
         else:
@@ -381,21 +379,21 @@ class Matcher:
 
         image0_name = Path(image_path).stem
         # 1. 원본 Roma 매칭 결과 시각화 (디버그 모드에서만)
-        if self.config["debug_mode"]:
-            logger.debug("원본 Roma 매칭 결과 시각화...")
 
-            visualize_matches(
-                image0_origin,
-                image1_origin,
-                matches_result["keypoints0"],
-                matches_result["keypoints1"],
-                matches_result["confidence"],
-                str(output_path / f"{image0_name}_matches_original.png"),
-                confidence_threshold=self.config["confidence_threshold"],
-            )
+        logger.debug("원본 Roma 매칭 결과 시각화...")
+
+        visualize_matches(
+            image0_origin,
+            image1_origin,
+            matches_result["keypoints0"],
+            matches_result["keypoints1"],
+            matches_result["confidence"],
+            str(output_path / f"{image0_name}_matches_original.png"),
+            confidence_threshold=self.config["confidence_threshold"],
+        )
 
         # 2. RANSAC 필터링 후 결과 시각화 (디버그 모드에서만)
-        if ransac_result and self.config["debug_mode"]:
+        if ransac_result:
             logger.debug("RANSAC 필터링 후 결과 시각화...")
             visualize_matches(
                 image0_origin,
@@ -408,7 +406,7 @@ class Matcher:
             )
 
             # 디버그 모드에서만 이미지 변환 및 시각화
-            if ransac_result["homography"] is not None and self.config["debug_mode"]:
+            if ransac_result["homography"] is not None:
                 logger.debug("이미지 변환 결과 생성...")
                 img0 = image0_origin
                 img1 = image1_origin
@@ -616,16 +614,14 @@ class Matcher:
             # 1. Roma 매칭
             # 경로 설정
 
-            target_image_origin = get_image_from_file(
-                target_image_path, width=2064, height=1544
-            )
+            # 이미지 로드 (PLY, TIFF, 일반 이미지 모두 지원)
+            depth_max = self.config.get("depth_max", 1700.0)
 
-            source_image_origin = get_image_from_file(
-                source_image_path, width=2064, height=1544
-            )
+            target_image_origin = read_image(target_image_path, depth_max=depth_max)
+            source_image_origin = read_image(source_image_path, depth_max=depth_max)
 
             matches_result = self.run_roma_matching(
-                target_image_origin, source_image_origin, self.config["max_keypoints"]
+                target_image_origin, source_image_origin
             )
 
             # 2. RANSAC 필터링
@@ -669,14 +665,15 @@ class Matcher:
                     logger.info(f"포인트 위치가 YAML 파일로 저장되었습니다.")
 
             # 4. 결과 시각화
-            self.visualize_results(
-                target_image_origin,
-                source_image_origin,
-                Path(target_image_path),
-                matches_result,
-                ransac_result,
-                output_dir,
-            )
+            if self.config["debug_mode"]:
+                self.visualize_results(
+                    target_image_origin,
+                    source_image_origin,
+                    Path(target_image_path),
+                    matches_result,
+                    ransac_result,
+                    output_dir,
+                )
 
             # 전체 시간 요약
             total_time = self.model_init_time + self.matching_time

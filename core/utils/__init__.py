@@ -15,7 +15,7 @@ from .processing_utils import (
 from .pcd_utils import (
     load_ply_as_image,
     is_ply_file,
-    get_image_from_file,
+    # get_image_from_file,
     PointCloudToImageConverter,
 )
 from .depth_utils import (
@@ -43,7 +43,6 @@ __all__ = [
     "set_null_pred",
     "load_ply_as_image",
     "is_ply_file",
-    "get_image_from_file",
     "PointCloudToImageConverter",
     "point_cloud_to_depth_map",
     "find_3d_from_2d_depthmap_robust",
