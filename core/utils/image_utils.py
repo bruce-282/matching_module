@@ -72,10 +72,6 @@ def read_image(
             elif len(image.shape) == 3 and image.shape[2] == 1:
                 image = np.concatenate([image] * 3, axis=-1)
 
-            # 32비트 float인 경우 depth map으로 처리
-            if image.dtype in [np.float32, np.float64]:
-                image = process_depth_map(image, depth_max)
-
         # 일반 이미지 파일 처리
         else:
             mode = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR

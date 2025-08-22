@@ -33,7 +33,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from core.matchers.roma import Roma
-from core.utils.image_utils import resize_image, read_image
+from core.utils.image_utils import resize_image, read_image, process_depth_map
 from core.utils.viz_utils import visualize_matches
 from core.utils.processing_utils import filter_matches, wrap_images, save_points_to_yaml
 from core.utils import (
@@ -356,6 +356,7 @@ class Matcher:
         self,
         image0_origin: np.ndarray,
         image1_origin: np.ndarray,
+        image0_clipped: np.ndarray,
         image_path: Path,
         matches_result: Dict[str, Any],
         ransac_result: Optional[Dict[str, Any]],
@@ -383,7 +384,7 @@ class Matcher:
         logger.debug("원본 Roma 매칭 결과 시각화...")
 
         visualize_matches(
-            image0_origin,
+            image0_clipped,
             image1_origin,
             matches_result["keypoints0"],
             matches_result["keypoints1"],
@@ -396,7 +397,7 @@ class Matcher:
         if ransac_result:
             logger.debug("RANSAC 필터링 후 결과 시각화...")
             visualize_matches(
-                image0_origin,
+                image0_clipped,
                 image1_origin,
                 ransac_result["filtered_kpts0"],
                 ransac_result["filtered_kpts1"],
@@ -437,7 +438,7 @@ class Matcher:
                 else:
                     logger.error("이미지 로드 실패")
 
-    def calculate_points(
+    def calculate_anchor_points(
         self,
         image0_origin: np.ndarray,
         image1_origin: np.ndarray,
@@ -507,9 +508,10 @@ class Matcher:
             logger.warning("Homography가 계산되지 않아 포인트를 계산할 수 없습니다.")
             return None
 
-    def calculate_depth(
+    def calculate_anchor_depth(
         self,
         target_image_path: str,
+        target_image_origin: np.ndarray,
         point1_2d: np.ndarray,
         point2_2d: np.ndarray,
         radius: int = 10,
@@ -531,9 +533,25 @@ class Matcher:
         target_image_path = Path(target_image_path)
 
         # PLY 파일이 아닌 경우 None 반환
-        if not is_ply_file(str(target_image_path)):
-            logger.debug("PLY 파일이 아니므로 3D 정보를 계산하지 않습니다.")
-            return None
+        if not is_ply_file(str(target_image_path)) and target_image_origin.dtype in [
+            np.float32,
+            np.float64,
+        ]:
+            # depth_image가 3차원인 경우 첫 번째 채널만 사용
+            if len(target_image_origin.shape) == 3:
+                target_image_origin = target_image_origin[:, :, 0]
+
+            intrinsic = np.array(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+            )  # 카메라 내부 파라미터
+
+            point1_3d = find_3d_from_2d_depthmap_robust(
+                target_image_origin, intrinsic, (point1_2d[0], point1_2d[1]), radius
+            )
+            point2_3d = find_3d_from_2d_depthmap_robust(
+                target_image_origin, intrinsic, (point2_2d[0], point2_2d[1]), radius
+            )
+            return point1_3d, point2_3d
 
         try:
             import open3d as o3d
@@ -615,14 +633,19 @@ class Matcher:
             # 경로 설정
 
             # 이미지 로드 (PLY, TIFF, 일반 이미지 모두 지원)
-            depth_max = self.config.get("depth_max", 1700.0)
+            depth_max = self.config.get("depth_max", 2000.0)
 
             target_image_origin = read_image(target_image_path, depth_max=depth_max)
+
+            # 32비트 float인 경우 depth map으로 처리
+            if target_image_origin.dtype in [np.float32, np.float64]:
+                target_clipped = process_depth_map(
+                    target_image_origin.copy(), depth_max
+                )
+
             source_image_origin = read_image(source_image_path, depth_max=depth_max)
 
-            matches_result = self.run_roma_matching(
-                target_image_origin, source_image_origin
-            )
+            matches_result = self.run_roma_matching(target_clipped, source_image_origin)
 
             # 2. RANSAC 필터링
             ransac_result = self.run_ransac_filtering(matches_result)
@@ -632,9 +655,8 @@ class Matcher:
                 output_path = Path(output_dir)
                 output_path.mkdir(exist_ok=True)
 
-                # 포인트 계산
-                points = self.calculate_points(
-                    target_image_origin, source_image_origin, ransac_result
+                points = self.calculate_anchor_points(
+                    target_clipped, source_image_origin, ransac_result
                 )
 
                 # YAML 파일 저장
@@ -644,8 +666,12 @@ class Matcher:
                     # 3D 포인트 계산 (PLY 파일인 경우에만)
                     point1_3d = None
                     point2_3d = None
-                    depth_result = self.calculate_depth(
-                        target_image_path, point1_2d, point2_2d
+
+                    depth_result = self.calculate_anchor_depth(
+                        target_image_path,
+                        target_image_origin,
+                        point1_2d,
+                        point2_2d,
                     )
                     if depth_result is not None:
                         point1_3d, point2_3d = depth_result
@@ -669,6 +695,7 @@ class Matcher:
                 self.visualize_results(
                     target_image_origin,
                     source_image_origin,
+                    target_clipped,
                     Path(target_image_path),
                     matches_result,
                     ransac_result,
