@@ -102,7 +102,7 @@ def main():
     parser.add_argument(
         "--depth_max",
         type=float,
-        default=2000.0,
+        default=2100.0,
         help="Depth map 최대 값 (기본값: 2000.0)",
     )
     parser.add_argument(
