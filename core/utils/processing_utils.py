@@ -280,13 +280,14 @@ def compute_geometry(
 def save_points_to_yaml(
     image_path: Path,
     image_size: Tuple[int, int],
-    x1: int,
-    y1: int,
-    x2: int,
-    y2: int,
+    point1_2d: Tuple[int, int],
+    point2_2d: Tuple[int, int],
+    point3_2d: Tuple[int, int],
     output_path: Optional[Path] = None,
     point1_3d: Optional[np.ndarray] = None,
     point2_3d: Optional[np.ndarray] = None,
+    point3_3d: Optional[np.ndarray] = None,
+    plane_normal: Optional[np.ndarray] = None,
 ) -> None:
     """포인트 위치를 YAML 파일로 저장합니다."""
 
@@ -306,8 +307,9 @@ def save_points_to_yaml(
             "height": int(image_size[0]),
         },
         "transformed_points": {
-            "pointL": {"x": int(x1), "y": int(y1)},
-            "pointR": {"x": int(x2), "y": int(y2)},
+            "pointL": {"x": int(point1_2d[0]), "y": int(point1_2d[1])},
+            "pointR": {"x": int(point2_2d[0]), "y": int(point2_2d[1])},
+            "pointU": {"x": int(point3_2d[0]), "y": int(point3_2d[1])},
         },
     }
 
@@ -315,14 +317,24 @@ def save_points_to_yaml(
     if point1_3d is not None and point2_3d is not None:
         points_data["transformed_points_3d"] = {
             "pointL": {
-                "x": float(point1_3d[0]),
-                "y": float(point1_3d[1]),
-                "z": float(point1_3d[2]),
+                "x": float(point1_3d[0] if point1_3d is not None else 0),
+                "y": float(point1_3d[1] if point1_3d is not None else 0),
+                "z": float(point1_3d[2] if point1_3d is not None else 0),
             },
             "pointR": {
-                "x": float(point2_3d[0]),
+                "x": float(point2_3d[0] if point2_3d is not None else 0),
                 "y": float(point2_3d[1]),
                 "z": float(point2_3d[2]),
+            },
+            "pointU": {
+                "x": float(point3_3d[0] if point3_3d is not None else 0),
+                "y": float(point3_3d[1] if point3_3d is not None else 0),
+                "z": float(point3_3d[2] if point3_3d is not None else 0),
+            },
+            "plane_normal": {
+                "x": float(plane_normal[0] if plane_normal is not None else 0),
+                "y": float(plane_normal[1] if plane_normal is not None else 0),
+                "z": float(plane_normal[2] if plane_normal is not None else 0),
             },
         }
 
@@ -343,8 +355,9 @@ def wrap_images(
     img1: np.ndarray,
     geo_info: Optional[Dict[str, List[float]]],
     geom_type: str,
-    offset_point1: Tuple[float, float] = (0.5, 0.92),
-    offset_point2: Tuple[float, float] = (1.4, 0.92),
+    offset_pointL: Tuple[float, float] = (0.5, 0.92),
+    offset_pointR: Tuple[float, float] = (1.4, 0.92),
+    offset_pointU: Tuple[float, float] = (0.9, 0.1),
     point_radius: int = 10,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
@@ -362,7 +375,7 @@ def wrap_images(
     h0, w0, _ = img0.shape
     h1, w1, _ = img1.shape
     if geo_info is not None and len(geo_info) != 0:
-        rectified_image0 = img0
+        # rectified_image0 = img0
         rectified_image1 = None
         if "Homography" not in geo_info:
             logger.warning(f"{geom_type} not exist, maybe too less matches")
@@ -379,8 +392,8 @@ def wrap_images(
             offset_point1_coords = np.array(
                 [
                     [
-                        w1 * offset_point1[0],
-                        h1 * offset_point1[1],
+                        w1 * offset_pointL[0],
+                        h1 * offset_pointL[1],
                         1,
                     ]
                 ],
@@ -395,8 +408,8 @@ def wrap_images(
             offset_point2_coords = np.array(
                 [
                     [
-                        w1 * offset_point2[0],
-                        h1 * offset_point2[1],
+                        w1 * offset_pointR[0],
+                        h1 * offset_pointR[1],
                         1,
                     ]
                 ],
@@ -405,6 +418,21 @@ def wrap_images(
             transformed_point_2 = H_inv @ offset_point2_coords.T
             transformed_point_2 = (
                 transformed_point_2 / transformed_point_2[2]
+            )  # Normalize homogeneous coordinates
+
+            offset_point3_coords = np.array(
+                [
+                    [
+                        w1 * offset_pointU[0],
+                        h1 * offset_pointU[1],
+                        1,
+                    ]
+                ],
+                dtype=np.float32,
+            )
+            transformed_point_3 = H_inv @ offset_point3_coords.T
+            transformed_point_3 = (
+                transformed_point_3 / transformed_point_3[2]
             )  # Normalize homogeneous coordinates
 
         else:
@@ -450,6 +478,16 @@ def wrap_images(
                 ):
                     cv2.circle(
                         overlapped_image, (x2, y2), point_radius, (255, 0, 0), -1
+                    )  # 빨간색 원
+
+                # Draw red circle for third transformed point
+                x3, y3 = int(transformed_point_3[0][0]), int(transformed_point_3[1][0])
+                if (
+                    0 <= x3 < overlapped_image.shape[1]
+                    and 0 <= y3 < overlapped_image.shape[0]
+                ):
+                    cv2.circle(
+                        overlapped_image, (x3, y3), point_radius, (255, 0, 0), -1
                     )  # 빨간색 원
 
                 # Add red tint to overlapping areas for better visibility

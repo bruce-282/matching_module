@@ -43,7 +43,7 @@ def main():
     parser.add_argument(
         "--max_keypoints",
         type=int,
-        default=2000,
+        default=2500,
         help="최대 키포인트 수",
     )
     parser.add_argument(
@@ -55,7 +55,7 @@ def main():
     parser.add_argument(
         "--ransac_reproj_threshold",
         type=float,
-        default=10.0,
+        default=12.0,
         help="RANSAC 재투영 임계값",
     )
     parser.add_argument(
@@ -70,28 +70,40 @@ def main():
         help="디버그 모드 활성화 (파일 저장)",
     )
     parser.add_argument(
-        "--offset_point1_x",
+        "--offset_pointL_x",
         type=float,
         default=0.5,
-        help="첫 번째 포인트 X 좌표 비율 (0.0 ~ 1.0)",
+        help="왼쪽 포인트 X 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
-        "--offset_point1_y",
+        "--offset_pointL_y",
         type=float,
         default=0.925,
-        help="첫 번째 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
+        help="왼쪽 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
-        "--offset_point2_x",
+        "--offset_pointR_x",
         type=float,
-        default=1.4,
-        help="두 번째 포인트 X 좌표 비율 (0.0 ~ 1.0)",
+        default=1.3,
+        help="오른쪽 포인트 X 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
-        "--offset_point2_y",
+        "--offset_pointR_y",
         type=float,
         default=0.937,
-        help="두 번째 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
+        help="오른쪽 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
+    )
+    parser.add_argument(
+        "--offset_pointU_x",
+        type=float,
+        default=0.92,
+        help="위쪽 포인트 X 좌표 비율 (0.0 ~ 1.0)",
+    )
+    parser.add_argument(
+        "--offset_pointU_y",
+        type=float,
+        default=0.6,
+        help="위쪽 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
         "--point_radius",
@@ -102,7 +114,7 @@ def main():
     parser.add_argument(
         "--depth_max",
         type=float,
-        default=2100.0,
+        default=2000.0,
         help="Depth map 최대 값 (기본값: 2000.0)",
     )
     parser.add_argument(
@@ -131,8 +143,9 @@ def main():
         "ransac_reproj_threshold": args.ransac_reproj_threshold,
         "ransac_confidence": args.ransac_confidence,
         "debug_mode": args.debug,
-        "offset_point1": (args.offset_point1_x, args.offset_point1_y),
-        "offset_point2": (args.offset_point2_x, args.offset_point2_y),
+        "offset_pointL": (args.offset_pointL_x, args.offset_pointL_y),
+        "offset_pointR": (args.offset_pointR_x, args.offset_pointR_y),
+        "offset_pointU": (args.offset_pointU_x, args.offset_pointU_y),
         "point_radius": args.point_radius,
         "depth_max": args.depth_max,
     }

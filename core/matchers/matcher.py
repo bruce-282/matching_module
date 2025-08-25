@@ -7,12 +7,14 @@ from re import L, T
 import sys
 from pathlib import Path
 import numpy as np
+from core.utils.pcd_utils import compute_plane_normal
 import cv2
 import time
 import torch
 import torchvision.transforms.functional as F
 import warnings
 import logging
+import open3d as o3d
 from typing import Dict, List, Optional, Tuple, Any
 
 # torchvision 경고 숨기기
@@ -22,10 +24,12 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
 logger = logging.getLogger(__name__)
 
 # 이미지 변환 관련 상수들
-DEFAULT_OFFSET_POINT1_X_RATIO = 0.5  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINT1_Y_RATIO = 0.92  # 이미지 높이의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINT2_X_RATIO = 1.4  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINT2_Y_RATIO = 0.94  # 이미지 높이의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINTL_X_RATIO = 0.5  # 이미지 너비의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINTL_Y_RATIO = 0.92  # 이미지 높이의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINTR_X_RATIO = 1.4  # 이미지 너비의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINTR_Y_RATIO = 0.94  # 이미지 높이의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINTU_X_RATIO = 0.9  # 이미지 너비의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINTU_Y_RATIO = 0.1  # 이미지 높이의 비율 (0.0 ~ 1.0)
 DEFAULT_POINT_RADIUS = 10  # 포인트 반지름
 
 # 프로젝트 루트를 Python 경로에 추가
@@ -36,6 +40,7 @@ from core.matchers.roma import Roma
 from core.utils.image_utils import resize_image, read_image, process_depth_map
 from core.utils.viz_utils import visualize_matches
 from core.utils.processing_utils import filter_matches, wrap_images, save_points_to_yaml
+from core.utils.pcd_utils import create_point_cloud_from_depth_image
 from core.utils import (
     is_ply_file,
     point_cloud_to_depth_map,
@@ -84,13 +89,17 @@ class Matcher:
             # 디버그 모드
             "debug_mode": False,
             # 이미지 변환 포인트 설정
-            "offset_point1": (
-                DEFAULT_OFFSET_POINT1_X_RATIO,
-                DEFAULT_OFFSET_POINT1_Y_RATIO,
+            "offset_pointL": (
+                DEFAULT_OFFSET_POINTL_X_RATIO,
+                DEFAULT_OFFSET_POINTL_Y_RATIO,
             ),
-            "offset_point2": (
-                DEFAULT_OFFSET_POINT2_X_RATIO,
-                DEFAULT_OFFSET_POINT2_Y_RATIO,
+            "offset_pointR": (
+                DEFAULT_OFFSET_POINTR_X_RATIO,
+                DEFAULT_OFFSET_POINTR_Y_RATIO,
+            ),
+            "offset_pointU": (
+                DEFAULT_OFFSET_POINTU_X_RATIO,
+                DEFAULT_OFFSET_POINTU_Y_RATIO,
             ),
             "point_radius": DEFAULT_POINT_RADIUS,
         }
@@ -371,6 +380,8 @@ class Matcher:
         image0_origin: np.ndarray,
         image1_origin: np.ndarray,
         image0_clipped: np.ndarray,
+        plane_normal: np.ndarray,
+        center_point_3d: np.ndarray,
         image_path: Path,
         matches_result: Dict[str, Any],
         ransac_result: Optional[Dict[str, Any]],
@@ -433,9 +444,30 @@ class Matcher:
                         img1,
                         ransac_result["geom_info"],
                         "Homography",
-                        offset_point1=self.config["offset_point1"],
-                        offset_point2=self.config["offset_point2"],
+                        offset_pointL=self.config["offset_pointL"],
+                        offset_pointR=self.config["offset_pointR"],
+                        offset_pointU=self.config["offset_pointU"],
                         point_radius=self.config["point_radius"],
+                    )
+
+                    intrinsic = o3d.camera.PinholeCameraIntrinsic(
+                        width=img0.shape[1],
+                        height=img0.shape[0],
+                        fx=2344.06988494,
+                        fy=2344.40009342502,
+                        cx=989.06314625513,
+                        cy=807.02989528271,
+                    )
+
+                    pcd = create_point_cloud_from_depth_image(
+                        img0,
+                        plane_normal,
+                        center_point_3d,
+                        intrinsic,
+                    )
+                    o3d.io.write_point_cloud(
+                        output_path / f"{image0_name}_with_normal.ply",
+                        pcd,
                     )
 
                     if warp_result[0] is not None:
@@ -457,7 +489,9 @@ class Matcher:
         image0_origin: np.ndarray,
         image1_origin: np.ndarray,
         ransac_result: Dict[str, Any],
-    ) -> Optional[Tuple[int, int, int, int, np.ndarray, np.ndarray]]:
+    ) -> Optional[
+        Tuple[int, int, int, int, int, int, np.ndarray, np.ndarray, np.ndarray]
+    ]:
         """
         RANSAC 결과를 바탕으로 포인트 위치를 계산
 
@@ -494,40 +528,55 @@ class Matcher:
                     logger.error("Homography 또는 Fundamental 행렬이 없습니다.")
 
                 # 포인트 변환 계산
-                offset_point1_coords = np.array(
+                offset_pointL_coords = np.array(
                     [
                         [
-                            w1 * self.config["offset_point1"][0],
-                            h1 * self.config["offset_point1"][1],
+                            w1 * self.config["offset_pointL"][0],
+                            h1 * self.config["offset_pointL"][1],
                             1,
                         ]
                     ],
                     dtype=np.float32,
                 )
-                transformed_point = transform_matrix @ offset_point1_coords.T
+                transformed_point = transform_matrix @ offset_pointL_coords.T
                 transformed_point = transformed_point / transformed_point[2]
 
-                offset_point2_coords = np.array(
+                offset_pointR_coords = np.array(
                     [
                         [
-                            w1 * self.config["offset_point2"][0],
-                            h1 * self.config["offset_point2"][1],
+                            w1 * self.config["offset_pointR"][0],
+                            h1 * self.config["offset_pointR"][1],
                             1,
                         ]
                     ],
                     dtype=np.float32,
                 )
-                transformed_point_2 = transform_matrix @ offset_point2_coords.T
+                transformed_point_2 = transform_matrix @ offset_pointR_coords.T
                 transformed_point_2 = transformed_point_2 / transformed_point_2[2]
+
+                offset_pointU_coords = np.array(
+                    [
+                        [
+                            w1 * self.config["offset_pointU"][0],
+                            h1 * self.config["offset_pointU"][1],
+                            1,
+                        ]
+                    ],
+                    dtype=np.float32,
+                )
+                transformed_point_3 = transform_matrix @ offset_pointU_coords.T
+                transformed_point_3 = transformed_point_3 / transformed_point_3[2]
 
                 x1, y1 = int(transformed_point[0][0]), int(transformed_point[1][0])
                 x2, y2 = int(transformed_point_2[0][0]), int(transformed_point_2[1][0])
+                x3, y3 = int(transformed_point_3[0][0]), int(transformed_point_3[1][0])
 
                 # 2D 포인트 정보 (원본 좌표계)
                 point1_2d = np.array([x1, y1])
                 point2_2d = np.array([x2, y2])
+                point3_2d = np.array([x3, y3])
 
-                return x1, y1, x2, y2, point1_2d, point2_2d
+                return x1, y1, x2, y2, x3, y3, point1_2d, point2_2d, point3_2d
             else:
                 logger.error("이미지 로드 실패")
                 return None
@@ -543,8 +592,9 @@ class Matcher:
         target_image_origin: np.ndarray,
         point1_2d: np.ndarray,
         point2_2d: np.ndarray,
+        point3_2d: np.ndarray,
         radius: int = 10,
-    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """
         2D 포인트에서 3D 포인트 정보를 계산 (PLY 파일인 경우에만)
 
@@ -552,10 +602,11 @@ class Matcher:
             target_image_path: 첫 번째 이미지 경로
             point1_2d: 첫 번째 2D 포인트 [x, y]
             point2_2d: 두 번째 2D 포인트 [x, y]
-            radius: 주변 픽셀 반지름 (기본값: 3)
+            point3_2d: 세 번째 2D 포인트 [x, y]
+            radius: 주변 픽셀 반지름 (기본값: 10)
 
         Returns:
-            3D 포인트 정보 (point1_3d, point2_3d) 또는 None
+            3D 포인트 정보 (point1_3d, point2_3d, point3_3d) 또는 None
         """
         from pathlib import Path
 
@@ -570,8 +621,13 @@ class Matcher:
             if len(target_image_origin.shape) == 3:
                 target_image_origin = target_image_origin[:, :, 0]
 
+            fx = target_image_origin.shape[1]
+            fy = target_image_origin.shape[0]
+            cx = target_image_origin.shape[1] / 2
+            cy = target_image_origin.shape[0] / 2
+
             intrinsic = np.array(
-                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+                [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float32
             )  # 카메라 내부 파라미터
 
             point1_3d = find_3d_from_2d_depthmap_robust(
@@ -580,7 +636,10 @@ class Matcher:
             point2_3d = find_3d_from_2d_depthmap_robust(
                 target_image_origin, intrinsic, (point2_2d[0], point2_2d[1]), radius
             )
-            return point1_3d, point2_3d
+            point3_3d = find_3d_from_2d_depthmap_robust(
+                target_image_origin, intrinsic, (point3_2d[0], point3_2d[1]), radius
+            )
+            return point1_3d, point2_3d, point3_3d
 
         try:
             import open3d as o3d
@@ -606,6 +665,7 @@ class Matcher:
             # 2D 포인트를 정수 좌표로 변환
             u1, v1 = int(point1_2d[0]), int(point1_2d[1])
             u2, v2 = int(point2_2d[0]), int(point2_2d[1])
+            u3, v3 = int(point3_2d[0]), int(point3_2d[1])
 
             # 3D 포인트 계산 (주변 픽셀 평균 사용)
             point1_3d = find_3d_from_2d_depthmap_robust(
@@ -614,10 +674,19 @@ class Matcher:
             point2_3d = find_3d_from_2d_depthmap_robust(
                 depth_image, intrinsic, (u2, v2), radius
             )
+            point3_3d = find_3d_from_2d_depthmap_robust(
+                depth_image, intrinsic, (u3, v3), radius
+            )
 
-            if point1_3d is not None and point2_3d is not None:
-                logger.info(f"3D 포인트 계산 완료: {point1_3d}, {point2_3d}")
-                return point1_3d, point2_3d
+            if (
+                point1_3d is not None
+                and point2_3d is not None
+                and point3_3d is not None
+            ):
+                logger.info(
+                    f"3D 포인트 계산 완료: {point1_3d}, {point2_3d}, {point3_3d}"
+                )
+                return point1_3d, point2_3d, point3_3d
             else:
                 logger.warning("3D 포인트 계산에 실패했습니다.")
                 return None
@@ -690,7 +759,7 @@ class Matcher:
 
                 # YAML 파일 저장
                 if points is not None:
-                    x1, y1, x2, y2, point1_2d, point2_2d = points
+                    x1, y1, x2, y2, x3, y3, point1_2d, point2_2d, point3_2d = points
 
                     # 3D 포인트 계산 (PLY 파일인 경우에만)
                     point1_3d = None
@@ -701,21 +770,35 @@ class Matcher:
                         target_image_origin,
                         point1_2d,
                         point2_2d,
+                        point3_2d,
                     )
-                    if depth_result is not None:
-                        point1_3d, point2_3d = depth_result
-                        logger.info("3D 포인트 정보가 계산되었습니다.")
+                    if depth_result is None:
+                        logger.error("3D 포인트 계산에 실패했습니다.")
+                        return None, None
+
+                    result1_3d, result2_3d, result3_3d = depth_result
+                    logger.debug(
+                        f"3D 포인트 정보: {result1_3d}, {result2_3d}, {result3_3d}"
+                    )
+
+                    plane_normal = compute_plane_normal(
+                        result1_3d, result2_3d, result3_3d
+                    )
+                    center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
+                    logger.debug(f"Plane normal: {plane_normal}")
+                    logger.debug(f"Center point: {center_point_3d}")
 
                     save_points_to_yaml(
                         Path(target_image_path),
                         target_image_origin.shape[:2],
-                        x1,
-                        y1,
-                        x2,
-                        y2,
+                        [x1, y1],
+                        [x2, y2],
+                        [x3, y3],
                         output_path,
-                        point1_3d,
-                        point2_3d,
+                        result1_3d,
+                        result2_3d,
+                        result3_3d,
+                        plane_normal,
                     )
                     logger.info(f"포인트 위치가 YAML 파일로 저장되었습니다.")
 
@@ -725,6 +808,8 @@ class Matcher:
                     target_image_origin,
                     source_image_origin,
                     target_clipped,
+                    plane_normal,
+                    center_point_3d,
                     Path(target_image_path),
                     matches_result,
                     ransac_result,

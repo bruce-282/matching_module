@@ -117,12 +117,13 @@ def find_3d_from_2d_depthmap_robust(
     z = np.median(depths)
 
     # Back-projection
-    fx, fy = intrinsic[0, 0], intrinsic[1, 1]
-    cx, cy = intrinsic[0, 2], intrinsic[1, 2]
+    # fx, fy = intrinsic[0, 0], intrinsic[1, 1]
+    # cx, cy = intrinsic[0, 2], intrinsic[1, 2]
 
-    x = (u - cx) * z / fx
-    y = (v - cy) * z / fy
-
+    # x = (u - cx) * z / fx
+    # y = (v - cy) * z / fy
+    x = u
+    y = v
     return np.array([x, y, z])
 
 
