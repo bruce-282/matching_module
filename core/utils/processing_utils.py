@@ -179,16 +179,21 @@ def filter_matches(
 
     if "Homography" in geom_info.keys():
         mask = geom_info["mask_h"]
-        if feature_type == "KEYPOINT":
-            pred["mmkeypoints0_orig"] = mkpts0[mask]
-            pred["mmkeypoints1_orig"] = mkpts1[mask]
-            pred["mmconf"] = pred["mconf"][mask]
-        elif feature_type == "LINE":
-            pred["mline_keypoints0_orig"] = mkpts0[mask]
-            pred["mline_keypoints1_orig"] = mkpts1[mask]
         pred["H"] = np.array(geom_info["Homography"])
+    elif "Fundamental" in geom_info.keys():
+        mask = geom_info["mask_f"]
+        pred["F"] = np.array(geom_info["Fundamental"])
     else:
         set_null_pred(feature_type, pred)
+
+    if feature_type == "KEYPOINT":
+        pred["mmkeypoints0_orig"] = mkpts0[mask]
+        pred["mmkeypoints1_orig"] = mkpts1[mask]
+        pred["mmconf"] = pred["mconf"][mask]
+    elif feature_type == "LINE":
+        pred["mline_keypoints0_orig"] = mkpts0[mask]
+        pred["mline_keypoints1_orig"] = mkpts1[mask]
+
     # do not show mask
     geom_info.pop("mask_h", None)
     geom_info.pop("mask_f", None)
@@ -250,16 +255,8 @@ def compute_geometry(
                 geo_info["Fundamental"] = F.tolist()
                 geo_info["mask_f"] = mask_f
 
-                # Save F matrix to JSON file
-                # f_matrix_data = {
-                #     "fundamental_matrix": F.tolist(),
-                #     "timestamp": time.time(),
-                #     "geometry_type": "Fundamental",
-                # }
                 return geo_info
-                # with open("fundamental_matrix.json", "w") as f:
-                #     json.dump(f_matrix_data, f, indent=2)
-                # logger.info("F matrix saved to fundamental_matrix.json")
+
         else:
             H, mask_h = proc_ransac_matches(
                 mkpts0,
@@ -271,26 +268,10 @@ def compute_geometry(
                 geometry_type="Homography",
             )
 
-            h0, w0, _ = pred["image0_orig"].shape
             if H is not None:
                 geo_info["Homography"] = H.tolist()
                 geo_info["mask_h"] = mask_h
-                # try:
-                #     _, H1, H2 = cv2.stereoRectifyUncalibrated(
-                #         mkpts0.reshape(-1, 2),
-                #         mkpts1.reshape(-1, 2),
-                #         F,
-                #         imgSize=(w0, h0),
-                #     )
-                #     if H1 is not None and H2 is not None:
-                #         geo_info["H1"] = H1.tolist()
-                #         geo_info["H2"] = H2.tolist()
-                #     else:
-                #         logger.warning(
-                #             "StereoRectifyUncalibrated returned None for H1 or H2"
-                #         )
-                # except cv2.error as e:
-                #     logger.error(f"StereoRectifyUncalibrated failed, skip! error: {e}")
+
             return geo_info
     else:
         return {}
@@ -426,16 +407,6 @@ def wrap_images(
                 transformed_point_2 / transformed_point_2[2]
             )  # Normalize homogeneous coordinates
 
-            title = ["Image 0", "Image 1 - warped"]
-        elif geom_type == "Fundamental":
-            if geom_type not in geo_info:
-                logger.warning(f"{geom_type} not exist, maybe too less matches")
-                return None, None
-            else:
-                H1, H2 = np.array(geo_info["H1"]), np.array(geo_info["H2"])
-                rectified_image0 = cv2.warpPerspective(img0, H1, (w0, h0))
-                rectified_image1 = cv2.warpPerspective(img1, H2, (w1, h1))
-                title = ["Image 0 - warped", "Image 1 - warped"]
         else:
             print("Error: Unknown geometry type")
 

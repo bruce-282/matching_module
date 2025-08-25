@@ -334,7 +334,7 @@ class Matcher:
             logger.debug(f"필터링 후 최고 신뢰도: {np.max(filtered_conf):.3f}")
 
         # Homography 행렬 정보
-        if "geom_info" in filtered_pred:
+        if "Homography" in filtered_pred["geom_info"]:
             H = filtered_pred["geom_info"]["Homography"]
             geom_info = filtered_pred["geom_info"]
 
@@ -345,6 +345,20 @@ class Matcher:
                 "filtered_kpts1": filtered_kpts1,
                 "filtered_conf": filtered_conf,
                 "homography": H,
+                "geom_info": geom_info,
+                "filter_time": filter_time,
+            }
+        elif "Fundamental" in filtered_pred["geom_info"]:
+            F = filtered_pred["geom_info"]["Fundamental"]
+            geom_info = filtered_pred["geom_info"]
+
+            logger.debug(f"Fundamental F:\n{F}")
+
+            return {
+                "filtered_kpts0": filtered_kpts0,
+                "filtered_kpts1": filtered_kpts1,
+                "filtered_conf": filtered_conf,
+                "fundamental": F,
                 "geom_info": geom_info,
                 "filter_time": filter_time,
             }
@@ -463,8 +477,21 @@ class Matcher:
                 # 포인트 위치 계산을 위한 간단한 변환
                 h0, w0, _ = img0.shape
                 h1, w1, _ = img1.shape
-                H = np.array(ransac_result["geom_info"]["Homography"])
-                H_inv = np.linalg.inv(H)
+
+                if "Homography" in ransac_result["geom_info"]:
+                    H = np.array(ransac_result["geom_info"]["Homography"])
+                    transform_matrix = np.linalg.inv(H)
+                elif "Fundamental" in ransac_result["geom_info"]:
+                    F = np.array(ransac_result["geom_info"]["Fundamental"])
+                    # E = K2.T @ F @ K1
+                    H, _ = cv2.findHomography(
+                        ransac_result["filtered_kpts0"],
+                        ransac_result["filtered_kpts1"],
+                        cv2.RANSAC,
+                    )
+                    transform_matrix = np.linalg.inv(H)
+                else:
+                    logger.error("Homography 또는 Fundamental 행렬이 없습니다.")
 
                 # 포인트 변환 계산
                 offset_point1_coords = np.array(
@@ -477,7 +504,7 @@ class Matcher:
                     ],
                     dtype=np.float32,
                 )
-                transformed_point = H_inv @ offset_point1_coords.T
+                transformed_point = transform_matrix @ offset_point1_coords.T
                 transformed_point = transformed_point / transformed_point[2]
 
                 offset_point2_coords = np.array(
@@ -490,7 +517,7 @@ class Matcher:
                     ],
                     dtype=np.float32,
                 )
-                transformed_point_2 = H_inv @ offset_point2_coords.T
+                transformed_point_2 = transform_matrix @ offset_point2_coords.T
                 transformed_point_2 = transformed_point_2 / transformed_point_2[2]
 
                 x1, y1 = int(transformed_point[0][0]), int(transformed_point[1][0])
@@ -505,7 +532,9 @@ class Matcher:
                 logger.error("이미지 로드 실패")
                 return None
         else:
-            logger.warning("Homography가 계산되지 않아 포인트를 계산할 수 없습니다.")
+            logger.warning(
+                "Homography 또는 Fundamental 행렬이 없어 포인트를 계산할 수 없습니다."
+            )
             return None
 
     def calculate_anchor_depth(
