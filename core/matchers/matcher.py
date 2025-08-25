@@ -381,7 +381,7 @@ class Matcher:
         image1_origin: np.ndarray,
         image0_clipped: np.ndarray,
         plane_normal: np.ndarray,
-        center_point_3d: np.ndarray,
+        depth_result: np.ndarray,
         image_path: Path,
         matches_result: Dict[str, Any],
         ransac_result: Optional[Dict[str, Any]],
@@ -458,13 +458,20 @@ class Matcher:
                         cx=989.06314625513,
                         cy=807.02989528271,
                     )
+                    result1_3d, result2_3d, result3_3d = depth_result
+
+                    center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
 
                     pcd = create_point_cloud_from_depth_image(
                         img0,
                         plane_normal,
                         center_point_3d,
                         intrinsic,
+                        result1_3d,
+                        result2_3d,
+                        result3_3d,
                     )
+
                     o3d.io.write_point_cloud(
                         output_path / f"{image0_name}_with_normal.ply",
                         pcd,
@@ -778,15 +785,42 @@ class Matcher:
 
                     result1_3d, result2_3d, result3_3d = depth_result
                     logger.debug(
-                        f"3D 포인트 정보: {result1_3d}, {result2_3d}, {result3_3d}"
+                        f"3D 포인트 정보: point1: {result1_3d} \n point2: {result2_3d} \n point3: {result3_3d}"
                     )
+
+                    def get_point_3d(point, intrinsic):
+
+                        fx = intrinsic.intrinsic_matrix[0, 0]
+                        fy = intrinsic.intrinsic_matrix[1, 1]
+                        cx = intrinsic.intrinsic_matrix[0, 2]
+                        cy = intrinsic.intrinsic_matrix[1, 2]
+
+                        # 3D 좌표 계산
+                        z = point[2]
+                        x = (point[0] - cx) * z / fx
+                        y = (point[1] - cy) * z / fy
+                        point_3d = np.array([x, y, z]) / 1000.0
+                        return point_3d
+
+                    intrinsic = o3d.camera.PinholeCameraIntrinsic(
+                        width=target_image_origin.shape[1],
+                        height=target_image_origin.shape[0],
+                        fx=2344.06988494,
+                        fy=2344.40009342502,
+                        cx=989.06314625513,
+                        cy=807.02989528271,
+                    )
+
+                    result1_3d = get_point_3d(result1_3d, intrinsic)
+                    result2_3d = get_point_3d(result2_3d, intrinsic)
+                    result3_3d = get_point_3d(result3_3d, intrinsic)
 
                     plane_normal = compute_plane_normal(
                         result1_3d, result2_3d, result3_3d
                     )
-                    center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
-                    logger.debug(f"Plane normal: {plane_normal}")
-                    logger.debug(f"Center point: {center_point_3d}")
+                    # center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
+                    # logger.debug(f"Plane normal: {plane_normal}")
+                    # logger.debug(f"Center point: {center_point_3d}")
 
                     save_points_to_yaml(
                         Path(target_image_path),
@@ -809,7 +843,7 @@ class Matcher:
                     source_image_origin,
                     target_clipped,
                     plane_normal,
-                    center_point_3d,
+                    depth_result,
                     Path(target_image_path),
                     matches_result,
                     ransac_result,

@@ -300,6 +300,9 @@ def create_point_cloud_from_depth_image(
     plane_normal: np.ndarray,
     center_point_3d: np.ndarray,
     intrinsic: o3d.camera.PinholeCameraIntrinsic,
+    point1_3d: Optional[np.ndarray] = None,
+    point2_3d: Optional[np.ndarray] = None,
+    point3_3d: Optional[np.ndarray] = None,
     scale: float = 1.0,
 ):
     """
@@ -321,7 +324,6 @@ def create_point_cloud_from_depth_image(
 
     # 크기 가져오기
     h, w = depth_array.shape[:2]
-    print(f"h: {h}, w: {w}")
     # scale 적용 및 Open3D Image 생성
     depth_scaled = (depth_array / scale).astype(np.float32)
     depth_o3d = o3d.geometry.Image(depth_scaled)
@@ -339,7 +341,35 @@ def create_point_cloud_from_depth_image(
 
     # Point cloud 생성
     pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsic)
-    # pcd = add_normal_line_to_pcd(pcd, center_point_3d, plane_normal)
+
+    # print(f"center_point_3d: {center_point_3d}")
+    def get_point_3d(point, intrinsic):
+
+        fx = intrinsic.intrinsic_matrix[0, 0]
+        fy = intrinsic.intrinsic_matrix[1, 1]
+        cx = intrinsic.intrinsic_matrix[0, 2]
+        cy = intrinsic.intrinsic_matrix[1, 2]
+
+        # 3D 좌표 계산
+        z = point[2]
+        x = (point[0] - cx) * z / fx
+        y = (point[1] - cy) * z / fy
+        point_3d = np.array([x, y, z]) / 1000.0
+        return point_3d
+
+    point1_3d = get_point_3d(point1_3d, intrinsic)
+    point2_3d = get_point_3d(point2_3d, intrinsic)
+    point3_3d = get_point_3d(point3_3d, intrinsic)
+
+    center_point_3d = (point1_3d + point2_3d + point3_3d) / 3
+    # print(f"center_point_3d 2: {center_point_3d}")
+    # print(f"pcd.get_center(): {pcd.get_center()}")
+    pcd = add_normal_line_to_pcd(pcd, center_point_3d, plane_normal)
+
+    # 3개의 3D 포인트에 빨간색 점 추가
+    if point1_3d is not None and point2_3d is not None and point3_3d is not None:
+        pcd = add_3d_points_to_pcd(pcd, [point1_3d, point2_3d, point3_3d])
+
     # pcd = draw_normal_at_center(pcd, center_point_3d, plane_normal)  # type: ignore
     return pcd
 
@@ -382,7 +412,7 @@ def add_normal_line_to_pcd(
     pcd,
     position: np.ndarray,
     normal: np.ndarray,
-    line_length=0.5,
+    line_length=0.1,
     num_points=50,
     line_color=[1, 0, 0],
 ):
@@ -402,11 +432,11 @@ def add_normal_line_to_pcd(
     line_points = origin + normal * t[:, np.newaxis]
 
     # 화살표 머리 부분 강조 (끝부분에 더 많은 점)
-    head_points = origin + normal * line_length
-    head_cloud = np.random.normal(head_points, 0.01, (20, 3))
+    # head_points = origin + normal * line_length
+    # head_cloud = np.random.normal(head_points, 0.01, (20, 3))
 
     # 모든 점 결합
-    arrow_points = np.vstack([line_points, head_cloud])
+    arrow_points = np.vstack([line_points])
 
     # Point Cloud 생성
     arrow_pcd = o3d.geometry.PointCloud()
@@ -418,6 +448,53 @@ def add_normal_line_to_pcd(
 
     # 병합
     combined_pcd = pcd + arrow_pcd
+
+    return combined_pcd
+
+
+def add_3d_points_to_pcd(
+    pcd,
+    points_3d: List[np.ndarray],
+    point_color: List[float] = [1, 0, 0],  # 빨간색
+    point_size: int = 80,
+):
+    """
+    3D 포인트들을 PCD에 빨간색 점으로 추가
+    """
+    # 각 3D 포인트 주변에 작은 구체 모양의 점들 생성
+    all_point_clouds = []
+
+    for point_3d in points_3d:
+        # 구체 표면의 점들 생성
+        phi = np.linspace(0, 2 * np.pi, 20)
+        theta = np.linspace(0, np.pi, 10)
+        phi_grid, theta_grid = np.meshgrid(phi, theta)
+
+        # 작은 구체 반지름
+        radius = 0.01
+
+        # 구체 표면 좌표
+        x = point_3d[0] + radius * np.sin(theta_grid) * np.cos(phi_grid)
+        y = point_3d[1] + radius * np.sin(theta_grid) * np.sin(phi_grid)
+        z = point_3d[2] + radius * np.cos(theta_grid)
+
+        # 점들로 변환
+        sphere_points = np.column_stack([x.flatten(), y.flatten(), z.flatten()])
+
+        # Point Cloud 생성
+        sphere_pcd = o3d.geometry.PointCloud()
+        sphere_pcd.points = o3d.utility.Vector3dVector(sphere_points)
+
+        # 색상 설정
+        colors = np.tile(point_color, (len(sphere_points), 1))
+        sphere_pcd.colors = o3d.utility.Vector3dVector(colors)
+
+        all_point_clouds.append(sphere_pcd)
+
+    # 모든 포인트 클라우드 병합
+    combined_pcd = pcd
+    for sphere_pcd in all_point_clouds:
+        combined_pcd = combined_pcd + sphere_pcd
 
     return combined_pcd
 
