@@ -3,7 +3,7 @@
 통합 매처 클래스 - Roma 매칭 + RANSAC 필터링
 """
 
-from re import L, T
+from re import L, S, T
 import sys
 from pathlib import Path
 import numpy as np
@@ -134,6 +134,20 @@ class Matcher:
         self.roma_model = Roma(conf)
         self.model_init_time = time.time() - init_start_time
         logger.info(f"모델 초기화 완료 (소요시간: {self.model_init_time:.3f}초)")
+        self.camera = None
+        # Camera 객체 생성 및 이미지 undistortion
+        # 설정에서 카메라 설정 파일이 있으면 사용, 없으면 기본 카메라 사용
+        camera_config_path = self.config["camera_config_path"]
+        if camera_config_path:
+            try:
+                self.camera = create_camera_from_config(camera_config_path)
+                logger.info(f"설정 파일에서 카메라 생성: {camera_config_path}")
+            except Exception as e:
+                logger.error(f"카메라 설정 파일 로드 실패, 기본 카메라 사용: {e}")
+                raise e
+        else:
+            logger.error("카메라 설정 파일이 없습니다.")
+            raise ValueError("카메라 설정 파일이 없습니다.")
 
     def scale_keypoints(self, kpts: torch.Tensor, scale: np.ndarray) -> torch.Tensor:
         """키포인트 스케일링"""
@@ -726,40 +740,23 @@ class Matcher:
         logger.debug(f"디버그 모드: {self.config['debug_mode']}")
 
         try:
-            # 1. Roma 매칭
-            # 경로 설정
-
-            # 이미지 로드 (PLY, TIFF, 일반 이미지 모두 지원)
-            depth_max = self.config.get("depth_max", 2000.0)
 
             target_image_origin = read_image(target_image_path)
 
-            # Camera 객체 생성 및 이미지 undistortion
-            # 설정에서 카메라 설정 파일이 있으면 사용, 없으면 기본 카메라 사용
-            camera_config_path = self.config.get("camera_config_path")
-            if camera_config_path:
-                try:
-                    camera = create_camera_from_config(camera_config_path)
-                    logger.info(f"설정 파일에서 카메라 생성: {camera_config_path}")
-                except Exception as e:
-                    logger.warning(f"카메라 설정 파일 로드 실패, 기본 카메라 사용: {e}")
-                    camera = create_default_camera(
-                        (target_image_origin.shape[1], target_image_origin.shape[0])
-                    )
-            else:
-                camera = create_default_camera(
-                    (target_image_origin.shape[1], target_image_origin.shape[0])
-                )
-            undistorted_target = camera.undistort_image(target_image_origin)
+            undistorted_target = self.camera.undistort_image(target_image_origin)
             # undistorted_target = target_image_origin
 
             # 32비트 float인 경우 depth map으로 처리
             if undistorted_target.dtype in [np.float32, np.float64]:
-                target_clipped = process_depth_map(undistorted_target.copy(), depth_max)
+                target_clipped = process_depth_map(
+                    undistorted_target.copy(), self.config["depth_max"]
+                )
 
             source_image_origin = read_image(source_image_path)
             # if source_image_origin.dtype in [np.float32, np.float64]:
-            source_clipped = process_depth_map(source_image_origin.copy(), depth_max)
+            source_clipped = process_depth_map(
+                source_image_origin.copy(), self.config["depth_max"]
+            )
 
             matches_result = self.run_roma_matching(target_clipped, source_clipped)
 
@@ -775,7 +772,7 @@ class Matcher:
                     target_clipped, source_clipped, ransac_result
                 )
                 result1_2d, result2_2d, result3_2d = result_points_2d
-                # YAML 파일 저장
+
                 if (
                     result1_2d is not None
                     and result2_2d is not None
@@ -845,7 +842,7 @@ class Matcher:
                         point_3d = np.array([x, y, z])
                         return point_3d
 
-                    intrinsic = camera.get_intrinsic_matrix()
+                    intrinsic = self.camera.get_intrinsic_matrix()
 
                     o3d_intrinsic = o3d.camera.PinholeCameraIntrinsic(
                         width=undistorted_target.shape[1],
@@ -897,7 +894,7 @@ class Matcher:
                     Path(target_image_path),
                     matches_result,
                     ransac_result,
-                    camera,
+                    self.camera,
                     output_dir,
                 )
 

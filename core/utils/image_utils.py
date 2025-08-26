@@ -23,7 +23,7 @@ def process_depth_map(
 
     Args:
         depth_image: 원본 depth map (float32/float64)
-        depth_max: 최대 depth 값, depth_unit에 따라 설정
+        depth_max: 최대 depth 값
 
     Returns:
         처리된 8비트 depth map (uint8)
