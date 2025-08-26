@@ -355,9 +355,9 @@ def wrap_images(
     img1: np.ndarray,
     geo_info: Optional[Dict[str, List[float]]],
     geom_type: str,
-    offset_pointL: Tuple[float, float] = (0.5, 0.92),
-    offset_pointR: Tuple[float, float] = (1.4, 0.92),
-    offset_pointU: Tuple[float, float] = (0.9, 0.1),
+    offset_pointL: Tuple[float, float],
+    offset_pointR: Tuple[float, float],
+    offset_pointU: Tuple[float, float],
     point_radius: int = 10,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """

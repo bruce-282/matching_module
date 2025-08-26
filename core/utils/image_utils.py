@@ -49,7 +49,6 @@ def process_depth_map(
 def read_image(
     path,
     grayscale=False,
-    depth_max: float = 1700.0,
 ):
     """이미지 또는 PLY 파일을 읽어서 numpy 배열로 반환합니다."""
     path = Path(path)

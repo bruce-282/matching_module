@@ -43,7 +43,7 @@ def main():
     parser.add_argument(
         "--max_keypoints",
         type=int,
-        default=2500,
+        default=3000,
         help="최대 키포인트 수",
     )
     parser.add_argument(
@@ -55,7 +55,7 @@ def main():
     parser.add_argument(
         "--ransac_reproj_threshold",
         type=float,
-        default=12.0,
+        default=14.0,
         help="RANSAC 재투영 임계값",
     )
     parser.add_argument(
@@ -108,7 +108,7 @@ def main():
     parser.add_argument(
         "--point_radius",
         type=int,
-        default=10,
+        default=20,
         help="포인트 반지름",
     )
     parser.add_argument(

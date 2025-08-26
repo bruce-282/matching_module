@@ -41,6 +41,7 @@ from core.utils.image_utils import resize_image, read_image, process_depth_map
 from core.utils.viz_utils import visualize_matches
 from core.utils.processing_utils import filter_matches, wrap_images, save_points_to_yaml
 from core.utils.pcd_utils import create_point_cloud_from_depth_image
+from core.utils.camera_utils import create_default_camera, undistort_image
 from core.utils import (
     is_ply_file,
     point_cloud_to_depth_map,
@@ -76,12 +77,12 @@ class Matcher:
             # 시각화 설정
             "confidence_threshold": 0.5,
             # 이미지 resize 설정
-            "resize_width": 640,
-            "resize_height": 480,
-            "resize_max": 1024,
+            "resize_width": 1024,
+            "resize_height": 768,
+            "resize_max": 640,
             "dfactor": 8,
             # 기타 설정
-            "force_resize": True,
+            "force_resize": False,
             "threshold": 0.1,
             "max_features": 2000,
             "keypoint_threshold": 0.01,
@@ -740,17 +741,24 @@ class Matcher:
             # 이미지 로드 (PLY, TIFF, 일반 이미지 모두 지원)
             depth_max = self.config.get("depth_max", 2000.0)
 
-            target_image_origin = read_image(target_image_path, depth_max=depth_max)
+            target_image_origin = read_image(target_image_path)
+
+            # Camera 객체 생성 및 이미지 undistortion
+            camera = create_default_camera(
+                (target_image_origin.shape[1], target_image_origin.shape[0])
+            )
+            undistorted_target = camera.undistort_image(target_image_origin)
+            # undistorted_target = target_image_origin
 
             # 32비트 float인 경우 depth map으로 처리
-            if target_image_origin.dtype in [np.float32, np.float64]:
-                target_clipped = process_depth_map(
-                    target_image_origin.copy(), depth_max
-                )
+            if undistorted_target.dtype in [np.float32, np.float64]:
+                target_clipped = process_depth_map(undistorted_target.copy(), depth_max)
 
-            source_image_origin = read_image(source_image_path, depth_max=depth_max)
+            source_image_origin = read_image(source_image_path)
+            # if source_image_origin.dtype in [np.float32, np.float64]:
+            source_clipped = process_depth_map(source_image_origin.copy(), depth_max)
 
-            matches_result = self.run_roma_matching(target_clipped, source_image_origin)
+            matches_result = self.run_roma_matching(target_clipped, source_clipped)
 
             # 2. RANSAC 필터링
             ransac_result = self.run_ransac_filtering(matches_result)
@@ -761,32 +769,62 @@ class Matcher:
                 output_path.mkdir(exist_ok=True)
 
                 points = self.calculate_anchor_points(
-                    target_clipped, source_image_origin, ransac_result
+                    target_clipped, source_clipped, ransac_result
                 )
-
+                x1, y1, x2, y2, x3, y3, point1_2d, point2_2d, point3_2d = points
                 # YAML 파일 저장
-                if points is not None:
-                    x1, y1, x2, y2, x3, y3, point1_2d, point2_2d, point3_2d = points
-
-                    # 3D 포인트 계산 (PLY 파일인 경우에만)
-                    point1_3d = None
-                    point2_3d = None
+                if (
+                    point1_2d is not None
+                    and point2_2d is not None
+                    and point3_2d is not None
+                ):
 
                     depth_result = self.calculate_anchor_depth(
                         target_image_path,
-                        target_image_origin,
+                        undistorted_target,
                         point1_2d,
                         point2_2d,
                         point3_2d,
+                        radius=self.config["radius"],
                     )
-                    if depth_result is None:
-                        logger.error("3D 포인트 계산에 실패했습니다.")
-                        return None, None
 
                     result1_3d, result2_3d, result3_3d = depth_result
                     logger.debug(
                         f"3D 포인트 정보: point1: {result1_3d} \n point2: {result2_3d} \n point3: {result3_3d}"
                     )
+                    if result1_3d is None or result2_3d is None or result3_3d is None:
+                        if self.config["debug_mode"]:
+                            visualize_matches(
+                                target_clipped,
+                                source_clipped,
+                                matches_result["keypoints0"],
+                                matches_result["keypoints1"],
+                                matches_result["confidence"],
+                                str(
+                                    output_path
+                                    / f"{Path(target_image_path).stem}_failed_matches_original.png"
+                                ),
+                                confidence_threshold=self.config[
+                                    "confidence_threshold"
+                                ],
+                            )
+                            visualize_matches(
+                                target_clipped,
+                                source_clipped,
+                                ransac_result["filtered_kpts0"],
+                                ransac_result["filtered_kpts1"],
+                                ransac_result["filtered_conf"],
+                                str(
+                                    output_path
+                                    / f"{Path(target_image_path).stem}_failed_matches_ransac_filtered.png"
+                                ),
+                                confidence_threshold=self.config[
+                                    "confidence_threshold"
+                                ],
+                            )
+
+                        logger.error("3D 포인트 계산에 실패했습니다.")
+                        return None, None
 
                     def get_point_3d(point, intrinsic):
 
@@ -802,18 +840,20 @@ class Matcher:
                         point_3d = np.array([x, y, z]) / 1000.0
                         return point_3d
 
-                    intrinsic = o3d.camera.PinholeCameraIntrinsic(
-                        width=target_image_origin.shape[1],
-                        height=target_image_origin.shape[0],
-                        fx=2344.06988494,
-                        fy=2344.40009342502,
-                        cx=989.06314625513,
-                        cy=807.02989528271,
+                    intrinsic = camera.get_intrinsic_matrix()
+
+                    o3d_intrinsic = o3d.camera.PinholeCameraIntrinsic(
+                        width=undistorted_target.shape[1],
+                        height=undistorted_target.shape[0],
+                        fx=intrinsic[0, 0],
+                        fy=intrinsic[1, 1],
+                        cx=intrinsic[0, 2],
+                        cy=intrinsic[1, 2],
                     )
 
-                    result1_3d = get_point_3d(result1_3d, intrinsic)
-                    result2_3d = get_point_3d(result2_3d, intrinsic)
-                    result3_3d = get_point_3d(result3_3d, intrinsic)
+                    result1_3d = get_point_3d(result1_3d, o3d_intrinsic)
+                    result2_3d = get_point_3d(result2_3d, o3d_intrinsic)
+                    result3_3d = get_point_3d(result3_3d, o3d_intrinsic)
 
                     plane_normal = compute_plane_normal(
                         result1_3d, result2_3d, result3_3d
@@ -835,12 +875,14 @@ class Matcher:
                         plane_normal,
                     )
                     logger.info(f"포인트 위치가 YAML 파일로 저장되었습니다.")
+                else:
+                    logger.warning("3D 포인트 계산에 실패했습니다.")
 
             # 4. 결과 시각화
             if self.config["debug_mode"]:
                 self.visualize_results(
-                    target_image_origin,
-                    source_image_origin,
+                    undistorted_target,
+                    source_clipped,
                     target_clipped,
                     plane_normal,
                     depth_result,
