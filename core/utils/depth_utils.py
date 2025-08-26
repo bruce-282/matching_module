@@ -79,7 +79,6 @@ def point_cloud_to_depth_map(
 
 def find_3d_from_2d_depthmap_robust(
     depth_image: np.ndarray,
-    intrinsic: np.ndarray,
     pixel_2d: Tuple[int, int],
     radius: int = 3,
 ) -> Optional[np.ndarray]:

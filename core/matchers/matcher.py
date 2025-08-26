@@ -629,23 +629,14 @@ class Matcher:
             if len(target_image_origin.shape) == 3:
                 target_image_origin = target_image_origin[:, :, 0]
 
-            fx = target_image_origin.shape[1]
-            fy = target_image_origin.shape[0]
-            cx = target_image_origin.shape[1] / 2
-            cy = target_image_origin.shape[0] / 2
-
-            intrinsic = np.array(
-                [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float32
-            )  # 카메라 내부 파라미터
-
             point1_3d = find_3d_from_2d_depthmap_robust(
-                target_image_origin, intrinsic, (point1_2d[0], point1_2d[1]), radius
+                target_image_origin, (point1_2d[0], point1_2d[1]), radius
             )
             point2_3d = find_3d_from_2d_depthmap_robust(
-                target_image_origin, intrinsic, (point2_2d[0], point2_2d[1]), radius
+                target_image_origin, (point2_2d[0], point2_2d[1]), radius
             )
             point3_3d = find_3d_from_2d_depthmap_robust(
-                target_image_origin, intrinsic, (point3_2d[0], point3_2d[1]), radius
+                target_image_origin, (point3_2d[0], point3_2d[1]), radius
             )
             return point1_3d, point2_3d, point3_3d
 
@@ -785,7 +776,7 @@ class Matcher:
                         point1_2d,
                         point2_2d,
                         point3_2d,
-                        radius=self.config["radius"],
+                        radius=self.config["point_radius"],
                     )
 
                     result1_3d, result2_3d, result3_3d = depth_result
