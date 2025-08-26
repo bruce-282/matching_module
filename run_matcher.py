@@ -118,11 +118,9 @@ def main():
         help="Depth map 최대 값 (기본값: 2000.0)",
     )
     parser.add_argument(
-        "--depth_unit",
+        "--camera_config",
         type=str,
-        default="mm",
-        choices=["m", "mm"],
-        help="Depth map 단위 (기본값: mm)",
+        help="카메라 설정 파일 경로 (JSON)",
     )
 
     args = parser.parse_args()
@@ -148,6 +146,7 @@ def main():
         "offset_pointU": (args.offset_pointU_x, args.offset_pointU_y),
         "point_radius": args.point_radius,
         "depth_max": args.depth_max,
+        "camera_config_path": args.camera_config,
     }
 
     # Matcher 인스턴스 생성

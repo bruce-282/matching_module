@@ -41,7 +41,12 @@ from core.utils.image_utils import resize_image, read_image, process_depth_map
 from core.utils.viz_utils import visualize_matches
 from core.utils.processing_utils import filter_matches, wrap_images, save_points_to_yaml
 from core.utils.pcd_utils import create_point_cloud_from_depth_image
-from core.utils.camera_utils import create_default_camera, undistort_image
+from core.utils.camera_utils import create_default_camera, undistort_image, Camera
+from core.utils.io_utils import (
+    create_camera_from_config,
+    extract_camera_params,
+    load_camera_config,
+)
 from core.utils import (
     is_ply_file,
     point_cloud_to_depth_map,
@@ -472,10 +477,14 @@ class Matcher:
                         result2_3d,
                         result3_3d,
                     )
+                    pcd_scaled = pcd.scale(1000.0, center=[0, 0, 0])
 
                     o3d.io.write_point_cloud(
                         output_path / f"{image0_name}_with_normal.ply",
                         pcd,
+                    )
+                    logger.debug(
+                        f"PLY 파일 저장: {output_path / f'{image0_name}_with_normal.ply'}"
                     )
 
                     if warp_result[0] is not None:
@@ -497,9 +506,7 @@ class Matcher:
         image0_origin: np.ndarray,
         image1_origin: np.ndarray,
         ransac_result: Dict[str, Any],
-    ) -> Optional[
-        Tuple[int, int, int, int, int, int, np.ndarray, np.ndarray, np.ndarray]
-    ]:
+    ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """
         RANSAC 결과를 바탕으로 포인트 위치를 계산
 
@@ -584,7 +591,7 @@ class Matcher:
                 point2_2d = np.array([x2, y2])
                 point3_2d = np.array([x3, y3])
 
-                return x1, y1, x2, y2, x3, y3, point1_2d, point2_2d, point3_2d
+                return point1_2d, point2_2d, point3_2d
             else:
                 logger.error("이미지 로드 실패")
                 return None
@@ -735,9 +742,21 @@ class Matcher:
             target_image_origin = read_image(target_image_path)
 
             # Camera 객체 생성 및 이미지 undistortion
-            camera = create_default_camera(
-                (target_image_origin.shape[1], target_image_origin.shape[0])
-            )
+            # 설정에서 카메라 설정 파일이 있으면 사용, 없으면 기본 카메라 사용
+            camera_config_path = self.config.get("camera_config_path")
+            if camera_config_path:
+                try:
+                    camera = create_camera_from_config(camera_config_path)
+                    logger.info(f"설정 파일에서 카메라 생성: {camera_config_path}")
+                except Exception as e:
+                    logger.warning(f"카메라 설정 파일 로드 실패, 기본 카메라 사용: {e}")
+                    camera = create_default_camera(
+                        (target_image_origin.shape[1], target_image_origin.shape[0])
+                    )
+            else:
+                camera = create_default_camera(
+                    (target_image_origin.shape[1], target_image_origin.shape[0])
+                )
             undistorted_target = camera.undistort_image(target_image_origin)
             # undistorted_target = target_image_origin
 
@@ -759,31 +778,33 @@ class Matcher:
                 output_path = Path(output_dir)
                 output_path.mkdir(exist_ok=True)
 
-                points = self.calculate_anchor_points(
+                result_points_2d = self.calculate_anchor_points(
                     target_clipped, source_clipped, ransac_result
                 )
-                x1, y1, x2, y2, x3, y3, point1_2d, point2_2d, point3_2d = points
+                result1_2d, result2_2d, result3_2d = result_points_2d
                 # YAML 파일 저장
                 if (
-                    point1_2d is not None
-                    and point2_2d is not None
-                    and point3_2d is not None
+                    result1_2d is not None
+                    and result2_2d is not None
+                    and result3_2d is not None
                 ):
 
                     depth_result = self.calculate_anchor_depth(
                         target_image_path,
                         undistorted_target,
-                        point1_2d,
-                        point2_2d,
-                        point3_2d,
+                        result1_2d,
+                        result2_2d,
+                        result3_2d,
                         radius=self.config["point_radius"],
                     )
 
                     result1_3d, result2_3d, result3_3d = depth_result
+
                     logger.debug(
-                        f"3D 포인트 정보: point1: {result1_3d} \n point2: {result2_3d} \n point3: {result3_3d}"
+                        f"3D 포인트 정보: \n point1: {result1_3d} \n point2: {result2_3d} \n point3: {result3_3d}"
                     )
                     if result1_3d is None or result2_3d is None or result3_3d is None:
+
                         if self.config["debug_mode"]:
                             visualize_matches(
                                 target_clipped,
@@ -828,7 +849,7 @@ class Matcher:
                         z = point[2]
                         x = (point[0] - cx) * z / fx
                         y = (point[1] - cy) * z / fy
-                        point_3d = np.array([x, y, z]) / 1000.0
+                        point_3d = np.array([x, y, z])
                         return point_3d
 
                     intrinsic = camera.get_intrinsic_matrix()
@@ -845,6 +866,9 @@ class Matcher:
                     result1_3d = get_point_3d(result1_3d, o3d_intrinsic)
                     result2_3d = get_point_3d(result2_3d, o3d_intrinsic)
                     result3_3d = get_point_3d(result3_3d, o3d_intrinsic)
+                    logger.debug(
+                        f"3D 포인트 정보(projected): \n point1: {result1_3d} \n point2: {result2_3d} \n point3: {result3_3d}"
+                    )
 
                     plane_normal = compute_plane_normal(
                         result1_3d, result2_3d, result3_3d
@@ -856,14 +880,14 @@ class Matcher:
                     save_points_to_yaml(
                         Path(target_image_path),
                         target_image_origin.shape[:2],
-                        [x1, y1],
-                        [x2, y2],
-                        [x3, y3],
-                        output_path,
+                        result1_2d,
+                        result2_2d,
+                        result3_2d,
                         result1_3d,
                         result2_3d,
                         result3_3d,
                         plane_normal,
+                        output_path,
                     )
                     logger.info(f"포인트 위치가 YAML 파일로 저장되었습니다.")
                 else:

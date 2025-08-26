@@ -165,37 +165,6 @@ def is_ply_file(file_path: str) -> bool:
     return Path(file_path).suffix.lower() == ".ply"
 
 
-# def get_image_from_file(
-#     file_path: str,
-#     width: int = 1920,
-#     height: int = 1080,
-#     intrinsic_matrix: Optional[np.ndarray] = None,
-# ) -> np.ndarray:
-#     """
-#     파일 경로에 따라 적절한 방법으로 이미지를 로드
-
-#     Args:
-#         file_path: 이미지 또는 PLY 파일 경로
-#         width: PLY 변환 시 이미지 너비
-#         height: PLY 변환 시 이미지 높이
-#         intrinsic_matrix: PLY 변환 시 카메라 내부 파라미터
-
-#     Returns:
-#         RGB 이미지 (height, width, 3)
-#     """
-#     file_path = Path(file_path)
-
-#     if is_ply_file(str(file_path)):
-#         logger.info(f"PLY 파일을 이미지로 변환: {file_path}")
-#         return load_ply_as_image(file_path, width, height, intrinsic_matrix)
-#     else:
-#         # 일반 이미지 파일 로드
-#         from .image_utils import read_image
-
-#         logger.info(f"일반 이미지 파일 로드: {file_path}")
-#         return read_image(str(file_path))
-
-
 def visualize_normal_on_pointcloud(
     pcd: o3d.geometry.PointCloud,
     normal_vector: np.ndarray,
@@ -303,7 +272,6 @@ def create_point_cloud_from_depth_image(
     point1_3d: Optional[np.ndarray] = None,
     point2_3d: Optional[np.ndarray] = None,
     point3_3d: Optional[np.ndarray] = None,
-    scale: float = 1.0,
 ):
     """
     Create a point cloud from a depth image using Open3D.
@@ -325,7 +293,7 @@ def create_point_cloud_from_depth_image(
     # 크기 가져오기
     h, w = depth_array.shape[:2]
     # scale 적용 및 Open3D Image 생성
-    depth_scaled = (depth_array / scale).astype(np.float32)
+    depth_scaled = (depth_array).astype(np.float32)
     depth_o3d = o3d.geometry.Image(depth_scaled)
 
     # Color 이미지 생성 (검은색)

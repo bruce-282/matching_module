@@ -280,14 +280,14 @@ def compute_geometry(
 def save_points_to_yaml(
     image_path: Path,
     image_size: Tuple[int, int],
-    point1_2d: Tuple[int, int],
-    point2_2d: Tuple[int, int],
-    point3_2d: Tuple[int, int],
-    output_path: Optional[Path] = None,
+    point1_2d: Optional[np.ndarray],
+    point2_2d: Optional[np.ndarray],
+    point3_2d: Optional[np.ndarray],
     point1_3d: Optional[np.ndarray] = None,
     point2_3d: Optional[np.ndarray] = None,
     point3_3d: Optional[np.ndarray] = None,
     plane_normal: Optional[np.ndarray] = None,
+    output_path: Optional[Path] = None,
 ) -> None:
     """포인트 위치를 YAML 파일로 저장합니다."""
 
@@ -306,7 +306,7 @@ def save_points_to_yaml(
             "width": int(image_size[1]),
             "height": int(image_size[0]),
         },
-        "transformed_points": {
+        "transformed_points_2d": {
             "pointL": {"x": int(point1_2d[0]), "y": int(point1_2d[1])},
             "pointR": {"x": int(point2_2d[0]), "y": int(point2_2d[1])},
             "pointU": {"x": int(point3_2d[0]), "y": int(point3_2d[1])},
@@ -323,7 +323,7 @@ def save_points_to_yaml(
             },
             "pointR": {
                 "x": float(point2_3d[0] if point2_3d is not None else 0),
-                "y": float(point2_3d[1]),
+                "y": float(point2_3d[1] if point2_3d is not None else 0),
                 "z": float(point2_3d[2]),
             },
             "pointU": {
