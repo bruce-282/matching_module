@@ -53,6 +53,16 @@ python run_matcher.py \
   --point_radius 10
 ```
 
+### 카메라 설정 파일을 사용한 예시 (Photoneo 카메라)
+```bash
+python run_matcher.py \
+  --source datasets/source2.png \
+  --target datasets/target2.tif \
+  --debug \
+  --depth_max 2050.0 \
+  --camera_config configs/photoneo_camera_config.json
+```
+
 ## 명령행 인자
 
 ### 필수 인자
@@ -71,19 +81,33 @@ python run_matcher.py \
 - `--offset_point2_x`: 두 번째 포인트 X 좌표 비율 (기본값: 1.4)
 - `--offset_point2_y`: 두 번째 포인트 Y 좌표 비율 (기본값: 0.92)
 - `--point_radius`: 포인트 반지름 (기본값: 10)
+- `--depth_max`: Depth map 최대 값 (기본값: 2000.0)
+- `--camera_config`: 카메라 설정 파일 경로 (JSON 형식)
 
 ## 입력 파일
 
 ### 이미지 파일
-- **형식**: PNG, JPG, JPEG 등 OpenCV가 지원하는 모든 이미지 형식
+- **형식**: PNG, JPG, JPEG, TIFF 등 OpenCV/PIL이 지원하는 모든 이미지 형식
 - **크기**: 제한 없음 (자동으로 resize됨)
 - **채널**: RGB 또는 그레이스케일 (자동 변환)
+- **Depth Map**: 32비트 TIFF 파일 지원 (PIL을 통한 로드)
+
+### 카메라 설정 파일 (선택사항)
+- **형식**: JSON
+- **용도**: 카메라 내부 파라미터, 왜곡 계수, 이미지 해상도 설정
+- **기본값**: 설정 파일이 없으면 기본 카메라 파라미터 사용
+
 
 ### 예시 디렉토리 구조
 ```
 datasets/
 ├── source.png
-└── target.png
+├── source2.png
+├── target.png
+└── target2.tif
+
+configs/
+└── photoneo_camera_config.json
 ```
 
 ## 출력 파일
