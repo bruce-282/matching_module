@@ -84,13 +84,13 @@ def main():
     parser.add_argument(
         "--offset_pointR_x",
         type=float,
-        default=1.26,
+        default=1.36,
         help="오른쪽 포인트 X 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
         "--offset_pointR_y",
         type=float,
-        default=0.925,
+        default=0.927,
         help="오른쪽 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
@@ -108,7 +108,7 @@ def main():
     parser.add_argument(
         "--point_radius",
         type=int,
-        default=20,
+        default=30,
         help="포인트 반지름",
     )
     parser.add_argument(

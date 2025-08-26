@@ -268,7 +268,7 @@ def create_point_cloud_from_depth_image(
     depth_image,  # np.ndarray 또는 o3d.geometry.Image
     plane_normal: np.ndarray,
     center_point_3d: np.ndarray,
-    intrinsic: o3d.camera.PinholeCameraIntrinsic,
+    intrinsic: np.ndarray,
     point1_3d: Optional[np.ndarray] = None,
     point2_3d: Optional[np.ndarray] = None,
     point3_3d: Optional[np.ndarray] = None,
@@ -308,15 +308,20 @@ def create_point_cloud_from_depth_image(
     )
 
     # Point cloud 생성
-    pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsic)
+    o3d_intrinsic = o3d.camera.PinholeCameraIntrinsic(
+        width=depth_array.shape[1],
+        height=depth_array.shape[0],
+        intrinsic_matrix=intrinsic,
+    )
+    pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, o3d_intrinsic)
 
     # print(f"center_point_3d: {center_point_3d}")
     def get_point_3d(point, intrinsic):
 
-        fx = intrinsic.intrinsic_matrix[0, 0]
-        fy = intrinsic.intrinsic_matrix[1, 1]
-        cx = intrinsic.intrinsic_matrix[0, 2]
-        cy = intrinsic.intrinsic_matrix[1, 2]
+        fx = intrinsic[0, 0]
+        fy = intrinsic[1, 1]
+        cx = intrinsic[0, 2]
+        cy = intrinsic[1, 2]
 
         # 3D 좌표 계산
         z = point[2]

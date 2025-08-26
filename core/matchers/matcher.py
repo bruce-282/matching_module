@@ -391,6 +391,7 @@ class Matcher:
         image_path: Path,
         matches_result: Dict[str, Any],
         ransac_result: Optional[Dict[str, Any]],
+        camera: Camera,
         output_dir: Optional[str] = None,
     ) -> None:
         """
@@ -456,14 +457,6 @@ class Matcher:
                         point_radius=self.config["point_radius"],
                     )
 
-                    intrinsic = o3d.camera.PinholeCameraIntrinsic(
-                        width=img0.shape[1],
-                        height=img0.shape[0],
-                        fx=2344.06988494,
-                        fy=2344.40009342502,
-                        cx=989.06314625513,
-                        cy=807.02989528271,
-                    )
                     result1_3d, result2_3d, result3_3d = depth_result
 
                     center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
@@ -472,12 +465,12 @@ class Matcher:
                         img0,
                         plane_normal,
                         center_point_3d,
-                        intrinsic,
+                        camera.get_intrinsic_matrix(),
                         result1_3d,
                         result2_3d,
                         result3_3d,
                     )
-                    pcd_scaled = pcd.scale(1000.0, center=[0, 0, 0])
+                    pcd.scale(1000.0, center=[0, 0, 0])
 
                     o3d.io.write_point_cloud(
                         output_path / f"{image0_name}_with_normal.ply",
@@ -904,6 +897,7 @@ class Matcher:
                     Path(target_image_path),
                     matches_result,
                     ransac_result,
+                    camera,
                     output_dir,
                 )
 

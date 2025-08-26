@@ -64,57 +64,6 @@ class Camera:
         )
         return undistorted_depth
 
-    def create_point_cloud_from_depth(
-        self,
-        depth_image: np.ndarray,
-        color_image: Optional[np.ndarray] = None,
-        scale: float = 1.0,
-    ) -> o3d.geometry.PointCloud:
-        """
-        Depth 이미지에서 Point Cloud 생성
-
-        Args:
-            depth_image: depth 이미지
-            color_image: color 이미지 (선택사항)
-            scale: depth 값 스케일링
-
-        Returns:
-            pcd: Point Cloud
-        """
-        # Depth 이미지 전처리
-        depth_scaled = (depth_image / scale).astype(np.float32)
-        depth_o3d = o3d.geometry.Image(depth_scaled)
-
-        # Color 이미지 처리
-        if color_image is not None:
-            color_o3d = o3d.geometry.Image(color_image)
-        else:
-            # Color 이미지가 없으면 검은색으로 생성
-            h, w = depth_image.shape[:2]
-            color_array = np.zeros((h, w, 3), dtype=np.uint8)
-            color_o3d = o3d.geometry.Image(color_array)
-
-        # RGBD 이미지 생성
-        rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
-            color=color_o3d,
-            depth=depth_o3d,
-            convert_rgb_to_intensity=False,
-        )
-
-        # Point Cloud 생성
-        intrinsic_o3d = o3d.camera.PinholeCameraIntrinsic(
-            width=self.image_size[0],
-            height=self.image_size[1],
-            fx=self.K[0, 0],
-            fy=self.K[1, 1],
-            cx=self.K[0, 2],
-            cy=self.K[1, 2],
-        )
-
-        pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsic_o3d)
-
-        return pcd
-
     def undistort_points(self, points_2d: np.ndarray) -> np.ndarray:
         """
         2D 포인트들 undistortion
