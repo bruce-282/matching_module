@@ -29,10 +29,16 @@ def main():
         help="첫 번째 이미지 경로",
     )
     parser.add_argument(
-        "--target",
+        "--target_texture",
         type=str,
-        default="datasets/target.png",
-        help="두 번째 이미지 경로",
+        default="",
+        help="Target texture 이미지 경로 (매칭용)",
+    )
+    parser.add_argument(
+        "--target_depth",
+        type=str,
+        default="datasets/target_depth.tif",
+        help="Target depth 이미지 경로 (depth 계산용)",
     )
     parser.add_argument(
         "--output_dir",
@@ -43,7 +49,7 @@ def main():
     parser.add_argument(
         "--max_keypoints",
         type=int,
-        default=3000,
+        default=2000,
         help="최대 키포인트 수",
     )
     parser.add_argument(
@@ -55,7 +61,7 @@ def main():
     parser.add_argument(
         "--ransac_reproj_threshold",
         type=float,
-        default=14.0,
+        default=30.0,
         help="RANSAC 재투영 임계값",
     )
     parser.add_argument(
@@ -78,25 +84,25 @@ def main():
     parser.add_argument(
         "--offset_pointL_y",
         type=float,
-        default=0.925,
+        default=0.89,
         help="왼쪽 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
         "--offset_pointR_x",
         type=float,
-        default=1.36,
+        default=1.38,
         help="오른쪽 포인트 X 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
         "--offset_pointR_y",
         type=float,
-        default=0.927,
+        default=0.89,
         help="오른쪽 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
         "--offset_pointU_x",
         type=float,
-        default=0.92,
+        default=0.9,
         help="위쪽 포인트 X 좌표 비율 (0.0 ~ 1.0)",
     )
     parser.add_argument(
@@ -108,7 +114,7 @@ def main():
     parser.add_argument(
         "--point_radius",
         type=int,
-        default=30,
+        default=25,
         help="포인트 반지름",
     )
     parser.add_argument(
@@ -122,6 +128,12 @@ def main():
         type=str,
         help="카메라 설정 파일 경로 (JSON)",
     )
+    parser.add_argument(
+        "--image_undistortion",
+        type=bool,
+        default=True,
+        help="이미지 왜곡 보정 활성화",
+    )
 
     args = parser.parse_args()
 
@@ -133,7 +145,8 @@ def main():
 
     # Matcher 설정
     config = {
-        "target_image_path": args.target,
+        "target_texture_path": args.target_texture,
+        "target_depth_path": args.target_depth,
         "source_image_path": args.source,
         "output_dir": args.output_dir,
         "max_keypoints": args.max_keypoints,
@@ -147,6 +160,7 @@ def main():
         "point_radius": args.point_radius,
         "depth_max": args.depth_max,
         "camera_config_path": args.camera_config,
+        "image_undistortion": args.image_undistortion,
     }
 
     # Matcher 인스턴스 생성
@@ -154,7 +168,8 @@ def main():
 
     # 파이프라인 실행
     matches_result, ransac_result = matcher.run_pipeline(
-        target_image_path=args.target,
+        target_texture_path=args.target_texture,
+        target_depth_path=args.target_depth,
         source_image_path=args.source,
         output_dir=args.output_dir,
     )

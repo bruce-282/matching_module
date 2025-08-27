@@ -272,6 +272,7 @@ def create_point_cloud_from_depth_image(
     point1_3d: Optional[np.ndarray] = None,
     point2_3d: Optional[np.ndarray] = None,
     point3_3d: Optional[np.ndarray] = None,
+    texture_image: Optional[np.ndarray] = None,  # texture 이미지 추가
 ):
     """
     Create a point cloud from a depth image using Open3D.
@@ -296,8 +297,18 @@ def create_point_cloud_from_depth_image(
     depth_scaled = (depth_array).astype(np.float32)
     depth_o3d = o3d.geometry.Image(depth_scaled)
 
-    # Color 이미지 생성 (검은색)
-    color_array = np.zeros((h, w, 3), dtype=np.uint8)
+    # Color 이미지 생성 (texture 이미지가 있으면 사용, 없으면 검은색)
+    if texture_image is not None:
+        # texture 이미지가 그레이스케일인 경우 RGB로 변환
+        if len(texture_image.shape) == 2:
+            color_array = cv2.cvtColor(texture_image, cv2.COLOR_GRAY2RGB)
+        else:
+            color_array = texture_image
+    else:
+        color_array = np.zeros((h, w, 3), dtype=np.uint8)
+
+    # C-style buffer로 변환 (Open3D 요구사항)
+    color_array = np.ascontiguousarray(color_array)
     color_o3d = o3d.geometry.Image(color_array)
 
     # RGBD 이미지 생성

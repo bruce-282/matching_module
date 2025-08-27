@@ -46,7 +46,11 @@ class Camera:
         Returns:
             undistorted_image: undistorted 이미지
         """
-        undistorted_image = cv2.remap(image, self.map1, self.map2, interpolation)
+        if self.map1 is not None and self.map2 is not None:
+            undistorted_image = cv2.remap(image, self.map1, self.map2, interpolation)
+        else:
+            undistorted_image = image
+            logger.warning("Undistortion 맵이 계산되지 않았습니다. 왜곡 보정 미적용")
         return undistorted_image.astype(image.dtype)
 
     def undistort_depth_image(self, depth_image: np.ndarray) -> np.ndarray:

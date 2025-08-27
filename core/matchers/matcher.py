@@ -23,14 +23,15 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
 # 로거 설정
 logger = logging.getLogger(__name__)
 
+
 # 이미지 변환 관련 상수들
 DEFAULT_OFFSET_POINTL_X_RATIO = 0.5  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINTL_Y_RATIO = 0.92  # 이미지 높이의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINTR_X_RATIO = 1.4  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINTR_Y_RATIO = 0.94  # 이미지 높이의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINTL_Y_RATIO = 0.89  # 이미지 높이의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINTR_X_RATIO = 1.38  # 이미지 너비의 비율 (0.0 ~ 1.0)
+DEFAULT_OFFSET_POINTR_Y_RATIO = 0.89  # 이미지 높이의 비율 (0.0 ~ 1.0)
 DEFAULT_OFFSET_POINTU_X_RATIO = 0.9  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINTU_Y_RATIO = 0.1  # 이미지 높이의 비율 (0.0 ~ 1.0)
-DEFAULT_POINT_RADIUS = 10  # 포인트 반지름
+DEFAULT_OFFSET_POINTU_Y_RATIO = 0.6  # 이미지 높이의 비율 (0.0 ~ 1.0)
+DEFAULT_POINT_RADIUS = 25  # 포인트 반지름
 
 # 프로젝트 루트를 Python 경로에 추가
 project_root = Path(__file__).parent.parent.parent
@@ -203,8 +204,11 @@ class Matcher:
         if grayscale:
             assert image.ndim == 2, image.shape
             image = image[None]
-        else:
+        elif image.ndim == 3:
             image = image.transpose((2, 0, 1))  # HxWxC to CxHxW
+        else:
+            # 2차원 이미지인 경우 (그레이스케일)
+            image = image[None]  # HxW to 1xHxW
 
         image = torch.from_numpy(image / 255.0).float()
 
@@ -397,15 +401,15 @@ class Matcher:
 
     def visualize_results(
         self,
-        image0_origin: np.ndarray,
-        image1_origin: np.ndarray,
-        image0_clipped: np.ndarray,
-        plane_normal: np.ndarray,
-        depth_result: np.ndarray,
-        image_path: Path,
-        matches_result: Dict[str, Any],
-        ransac_result: Optional[Dict[str, Any]],
-        camera: Camera,
+        target_texture: np.ndarray = None,
+        target_depth: np.ndarray = None,
+        source_image: np.ndarray = None,
+        plane_normal: np.ndarray = None,
+        depth_result: np.ndarray = None,
+        image_path: Path = None,
+        matches_result: Dict[str, Any] = None,
+        ransac_result: Optional[Dict[str, Any]] = None,
+        camera: Camera = None,
         output_dir: Optional[str] = None,
     ) -> None:
         """
@@ -429,9 +433,14 @@ class Matcher:
 
         logger.debug("원본 Roma 매칭 결과 시각화...")
 
+        if target_texture is not None:
+            target_image = target_texture
+        else:
+            target_image = target_depth
+
         visualize_matches(
-            image0_clipped,
-            image1_origin,
+            target_image,
+            source_image,
             matches_result["keypoints0"],
             matches_result["keypoints1"],
             matches_result["confidence"],
@@ -443,8 +452,8 @@ class Matcher:
         if ransac_result:
             logger.debug("RANSAC 필터링 후 결과 시각화...")
             visualize_matches(
-                image0_clipped,
-                image1_origin,
+                target_image,
+                source_image,
                 ransac_result["filtered_kpts0"],
                 ransac_result["filtered_kpts1"],
                 ransac_result["filtered_conf"],
@@ -455,14 +464,12 @@ class Matcher:
             # 디버그 모드에서만 이미지 변환 및 시각화
             if ransac_result["homography"] is not None:
                 logger.debug("이미지 변환 결과 생성...")
-                img0 = image0_origin
-                img1 = image1_origin
 
-                if img0 is not None and img1 is not None:
+                if target_image is not None and source_image is not None:
                     # 이미지 변환 및 오버레이
                     warp_result = wrap_images(
-                        img0,
-                        img1,
+                        target_image,
+                        source_image,
                         ransac_result["geom_info"],
                         "Homography",
                         offset_pointL=self.config["offset_pointL"],
@@ -476,13 +483,16 @@ class Matcher:
                     center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
 
                     pcd = create_point_cloud_from_depth_image(
-                        img0,
+                        target_depth,  # depth 이미지
                         plane_normal,
                         center_point_3d,
                         camera.get_intrinsic_matrix(),
                         result1_3d,
                         result2_3d,
                         result3_3d,
+                        texture_image=(
+                            target_texture if target_texture is not None else None
+                        ),  # texture 이미지 (source 이미지 사용)
                     )
                     pcd.scale(1000.0, center=[0, 0, 0])
 
@@ -610,8 +620,8 @@ class Matcher:
 
     def calculate_anchor_depth(
         self,
-        target_image_path: str,
-        target_image_origin: np.ndarray,
+        target_depth_path: str,
+        target_depth_origin: np.ndarray,
         point1_2d: np.ndarray,
         point2_2d: np.ndarray,
         point3_2d: np.ndarray,
@@ -632,25 +642,25 @@ class Matcher:
         """
         from pathlib import Path
 
-        target_image_path = Path(target_image_path)
+        target_depth_path = Path(target_depth_path)
 
-        # PLY 파일이 아닌 경우 None 반환
-        if not is_ply_file(str(target_image_path)) and target_image_origin.dtype in [
+        # PLY 파일이 아닌 경우 depth map 처리
+        if not is_ply_file(str(target_depth_path)) and target_depth_origin.dtype in [
             np.float32,
             np.float64,
         ]:
             # depth_image가 3차원인 경우 첫 번째 채널만 사용
-            if len(target_image_origin.shape) == 3:
-                target_image_origin = target_image_origin[:, :, 0]
+            if len(target_depth_origin.shape) == 3:
+                target_depth_origin = target_depth_origin[:, :, 0]
 
             point1_3d = find_3d_from_2d_depthmap_robust(
-                target_image_origin, (point1_2d[0], point1_2d[1]), radius
+                target_depth_origin, (point1_2d[0], point1_2d[1]), radius
             )
             point2_3d = find_3d_from_2d_depthmap_robust(
-                target_image_origin, (point2_2d[0], point2_2d[1]), radius
+                target_depth_origin, (point2_2d[0], point2_2d[1]), radius
             )
             point3_3d = find_3d_from_2d_depthmap_robust(
-                target_image_origin, (point3_2d[0], point3_2d[1]), radius
+                target_depth_origin, (point3_2d[0], point3_2d[1]), radius
             )
             return point1_3d, point2_3d, point3_3d
 
@@ -658,8 +668,8 @@ class Matcher:
             import open3d as o3d
 
             # PLY 파일 로드
-            logger.debug(f"PLY 파일에서 3D 정보를 추출하는 중: {target_image_path}")
-            pcd = o3d.io.read_point_cloud(str(target_image_path))
+            logger.debug(f"PLY 파일에서 3D 정보를 추출하는 중: {target_depth_path}")
+            pcd = o3d.io.read_point_cloud(str(target_depth_path))
 
             if not pcd.has_points():
                 logger.warning("PLY 파일에 포인트가 없습니다.")
@@ -710,7 +720,8 @@ class Matcher:
 
     def run_pipeline(
         self,
-        target_image_path: Optional[str] = None,
+        target_texture_path: Optional[str] = None,
+        target_depth_path: Optional[str] = None,
         source_image_path: Optional[str] = None,
         output_dir: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
@@ -718,21 +729,24 @@ class Matcher:
         전체 파이프라인 실행
 
         Args:
-            image0_path: 첫 번째 이미지 경로
-            image1_path: 두 번째 이미지 경로
+            target_texture_path: Target texture 이미지 경로 (매칭용)
+            target_depth_path: Target depth 이미지 경로 (depth 계산용)
+            source_image_path: Source 이미지 경로
             output_dir: 출력 디렉토리
 
         Returns:
             Roma 매칭 결과와 RANSAC 필터링 결과
         """
         # 경로 설정
-        target_image_path = target_image_path or self.config["target_image_path"]
+        target_texture_path = None or self.config["target_texture_path"]
+        target_depth_path = target_depth_path or self.config["target_depth_path"]
         source_image_path = source_image_path or self.config["source_image_path"]
         output_dir = output_dir or self.config["output_dir"]
 
         logger.debug("=== Roma 매칭 + RANSAC 필터링 시작 ===")
-        logger.debug(f"이미지0: {target_image_path}")
-        logger.debug(f"이미지1: {source_image_path}")
+        logger.debug(f"Target texture: {target_texture_path}")
+        logger.debug(f"Target depth: {target_depth_path}")
+        logger.debug(f"Source image: {source_image_path}")
         logger.debug(f"출력 디렉토리: {output_dir}")
         logger.debug(f"최대 키포인트: {self.config['max_keypoints']}")
         logger.debug(f"RANSAC 재투영 임계값: {self.config['ransac_reproj_threshold']}")
@@ -740,25 +754,34 @@ class Matcher:
         logger.debug(f"디버그 모드: {self.config['debug_mode']}")
 
         try:
+            # 1. Texture 이미지 로드 (매칭용)
+            def load_image(path):
+                image = read_image(path)
+                if self.config["image_undistortion"]:
+                    image = self.camera.undistort_image(image)
+                return image
 
-            target_image_origin = read_image(target_image_path)
+            target_depth = load_image(target_depth_path)
 
-            undistorted_target = self.camera.undistort_image(target_image_origin)
-            # undistorted_target = target_image_origin
-
-            # 32비트 float인 경우 depth map으로 처리
-            if undistorted_target.dtype in [np.float32, np.float64]:
+            if target_texture_path:
+                texture_exist = True
+                target_image = load_image(target_texture_path)
                 target_clipped = process_depth_map(
-                    undistorted_target.copy(), self.config["depth_max"]
+                    depth_image=target_depth,
+                    texture_image=target_image,
+                    depth_max=self.config["depth_max"],
+                )
+            else:
+                texture_exist = False
+                target_image = target_depth
+                target_clipped = process_depth_map(
+                    depth_image=target_depth,
+                    depth_max=self.config["depth_max"],
                 )
 
-            source_image_origin = read_image(source_image_path)
-            # if source_image_origin.dtype in [np.float32, np.float64]:
-            source_clipped = process_depth_map(
-                source_image_origin.copy(), self.config["depth_max"]
-            )
+            source_image = read_image(source_image_path)
 
-            matches_result = self.run_roma_matching(target_clipped, source_clipped)
+            matches_result = self.run_roma_matching(target_clipped, source_image)
 
             # 2. RANSAC 필터링
             ransac_result = self.run_ransac_filtering(matches_result)
@@ -769,7 +792,7 @@ class Matcher:
                 output_path.mkdir(exist_ok=True)
 
                 result_points_2d = self.calculate_anchor_points(
-                    target_clipped, source_clipped, ransac_result
+                    target_image, source_image, ransac_result
                 )
                 result1_2d, result2_2d, result3_2d = result_points_2d
 
@@ -780,8 +803,8 @@ class Matcher:
                 ):
 
                     depth_result = self.calculate_anchor_depth(
-                        target_image_path,
-                        undistorted_target,
+                        target_depth_path,
+                        target_depth,
                         result1_2d,
                         result2_2d,
                         result3_2d,
@@ -791,20 +814,20 @@ class Matcher:
                     result1_3d, result2_3d, result3_3d = depth_result
 
                     logger.debug(
-                        f"3D 포인트 정보: \n point1: {result1_3d} \n point2: {result2_3d} \n point3: {result3_3d}"
+                        f"3D 포인트 정보: \n pointL: {result1_3d} \n pointR: {result2_3d} \n pointU: {result3_3d}"
                     )
                     if result1_3d is None or result2_3d is None or result3_3d is None:
 
                         if self.config["debug_mode"]:
                             visualize_matches(
                                 target_clipped,
-                                source_clipped,
+                                source_image,
                                 matches_result["keypoints0"],
                                 matches_result["keypoints1"],
                                 matches_result["confidence"],
                                 str(
                                     output_path
-                                    / f"{Path(target_image_path).stem}_failed_matches_original.png"
+                                    / f"{Path(target_texture_path).stem}_failed_matches_original.png"
                                 ),
                                 confidence_threshold=self.config[
                                     "confidence_threshold"
@@ -812,13 +835,13 @@ class Matcher:
                             )
                             visualize_matches(
                                 target_clipped,
-                                source_clipped,
+                                source_image,
                                 ransac_result["filtered_kpts0"],
                                 ransac_result["filtered_kpts1"],
                                 ransac_result["filtered_conf"],
                                 str(
                                     output_path
-                                    / f"{Path(target_image_path).stem}_failed_matches_ransac_filtered.png"
+                                    / f"{Path(target_texture_path).stem}_failed_matches_ransac_filtered.png"
                                 ),
                                 confidence_threshold=self.config[
                                     "confidence_threshold"
@@ -828,7 +851,7 @@ class Matcher:
                         logger.error("3D 포인트 계산에 실패했습니다.")
                         return None, None
 
-                    def get_point_3d(point, intrinsic):
+                    def get_projected_3d(point, intrinsic):
 
                         fx = intrinsic.intrinsic_matrix[0, 0]
                         fy = intrinsic.intrinsic_matrix[1, 1]
@@ -845,31 +868,28 @@ class Matcher:
                     intrinsic = self.camera.get_intrinsic_matrix()
 
                     o3d_intrinsic = o3d.camera.PinholeCameraIntrinsic(
-                        width=undistorted_target.shape[1],
-                        height=undistorted_target.shape[0],
+                        width=target_image.shape[1],
+                        height=target_image.shape[0],
                         fx=intrinsic[0, 0],
                         fy=intrinsic[1, 1],
                         cx=intrinsic[0, 2],
                         cy=intrinsic[1, 2],
                     )
 
-                    result1_3d = get_point_3d(result1_3d, o3d_intrinsic)
-                    result2_3d = get_point_3d(result2_3d, o3d_intrinsic)
-                    result3_3d = get_point_3d(result3_3d, o3d_intrinsic)
+                    result1_3d = get_projected_3d(result1_3d, o3d_intrinsic)
+                    result2_3d = get_projected_3d(result2_3d, o3d_intrinsic)
+                    result3_3d = get_projected_3d(result3_3d, o3d_intrinsic)
                     logger.debug(
-                        f"3D 포인트 정보(projected): \n point1: {result1_3d} \n point2: {result2_3d} \n point3: {result3_3d}"
+                        f"3D 포인트 정보(projected): \n pointL: {result1_3d} \n pointR: {result2_3d} \n pointU: {result3_3d}"
                     )
 
                     plane_normal = compute_plane_normal(
                         result1_3d, result2_3d, result3_3d
                     )
-                    # center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
-                    # logger.debug(f"Plane normal: {plane_normal}")
-                    # logger.debug(f"Center point: {center_point_3d}")
 
                     save_points_to_yaml(
-                        Path(target_image_path),
-                        target_image_origin.shape[:2],
+                        Path(target_depth_path),
+                        target_depth.shape[:2],
                         result1_2d,
                         result2_2d,
                         result3_2d,
@@ -886,16 +906,18 @@ class Matcher:
             # 4. 결과 시각화
             if self.config["debug_mode"]:
                 self.visualize_results(
-                    undistorted_target,
-                    source_clipped,
-                    target_clipped,
-                    plane_normal,
-                    depth_result,
-                    Path(target_image_path),
-                    matches_result,
-                    ransac_result,
-                    self.camera,
-                    output_dir,
+                    target_texture=target_image if texture_exist else None,
+                    target_depth=target_depth,
+                    source_image=source_image,
+                    plane_normal=plane_normal,
+                    depth_result=depth_result,
+                    image_path=Path(
+                        target_texture_path if texture_exist else target_depth_path
+                    ),
+                    matches_result=matches_result,
+                    ransac_result=ransac_result,
+                    camera=self.camera,
+                    output_dir=output_dir,
                 )
 
             # 전체 시간 요약

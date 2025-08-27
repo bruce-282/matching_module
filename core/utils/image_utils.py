@@ -3,6 +3,7 @@
 """
 
 from pathlib import Path
+from re import escape
 import torch
 from PIL import Image
 import numpy as np
@@ -16,34 +17,57 @@ logging.getLogger("PIL").setLevel(logging.WARNING)
 
 def process_depth_map(
     depth_image: np.ndarray,
+    texture_image: np.ndarray = None,
     depth_max: float = 1500.0,
 ) -> np.ndarray:
     """
     Depth map을 처리하여 8비트 이미지로 변환합니다.
+    depth_max보다 큰 값은 texture 값으로 대체합니다.
 
     Args:
         depth_image: 원본 depth map (float32/float64)
         depth_max: 최대 depth 값
+        texture_image: texture 이미지 (depth_max 초과 시 사용)
 
     Returns:
         처리된 8비트 depth map (uint8)
     """
 
-    # Depth max 값보다 큰 값은 0으로 설정
-    depth_image[depth_image > depth_max] = 0.0
+    # Depth max 값보다 큰 값은 texture 값으로 대체
+    if texture_image is not None:
+        # texture 이미지가 3채널인 경우 그대로 사용, 2채널인 경우 RGB로 변환
+        # if len(texture_image.shape) == 3:
+        #     texture_rgb = texture_image
+        # else:
+        #     # 그레이스케일을 RGB로 변환
+        #     texture_rgb = cv2.cvtColor(texture_image, cv2.COLOR_GRAY2RGB)
 
-    # 정규화 (0-255 범위로 변환)
-    if depth_max > 0:
-        normalized_depth = (depth_image / depth_max) * 255.0
+        # depth_image가 3차원인 경우 첫 번째 채널만 사용
+        # if len(depth_image.shape) == 3:
+        #     depth_image_2d = depth_image[:, :, 0].copy()
+        # else:
+        #     depth_image_2d = depth_image.copy()
+
+        # depth_max 초과하는 부분을 texture 값으로 대체
+        processed = texture_image.copy()
+        mask = (depth_image > depth_max) | (depth_image == 0.0)
+        processed[mask] = 0
     else:
-        normalized_depth = np.zeros_like(depth_image)
+        # texture 이미지가 없으면 기존 방식 (0으로 설정)
+        processed = depth_image.copy()
+        processed[depth_image > depth_max] = 0.0
 
-    normalized_depth[normalized_depth > 0] = 255.0
+        if depth_max > 0:
+            normalized_depth = (processed / depth_max) * 255.0
+        else:
+            normalized_depth = np.zeros_like(processed)
 
-    # 8비트로 변환 (이미 0으로 설정된 값들은 그대로 0)
-    depth_8bit = normalized_depth.astype(np.uint8)
+        normalized_depth[normalized_depth > 0] = 255.0
 
-    return depth_8bit
+        # 8비트로 변환
+        processed = normalized_depth.astype(np.uint8)
+
+    return processed
 
 
 def read_image(

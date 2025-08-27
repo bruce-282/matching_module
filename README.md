@@ -35,6 +35,14 @@ pip install -r requirements.txt
 python run_matcher.py --source datasets/source.png --target datasets/target.png
 ```
 
+### Texture와 Depth 분리 사용법 (권장)
+```bash
+python run_matcher.py \
+  --target_texture datasets/target_texture.jpg \
+  --target_depth datasets/target_depth.tif \
+  --source datasets/source.jpg
+```
+
 ### 모든 옵션을 사용한 예시
 ```bash
 python run_matcher.py \
@@ -55,9 +63,19 @@ python run_matcher.py \
 
 ### 카메라 설정 파일을 사용한 예시 (Photoneo 카메라)
 ```bash
+# 기존 방식
 python run_matcher.py \
-  --source datasets/source2.png \
-  --target datasets/target2.tif \
+  --source datasets/source.png \
+  --target datasets/target.tif \
+  --debug \
+  --depth_max 2050.0 \
+  --camera_config configs/photoneo_camera_config.json
+
+# Texture와 Depth 분리 방식 (권장)
+python run_matcher.py \
+  --target_texture datasets/target_texture.jpg \
+  --target_depth datasets/target_depth.tif \
+  --source datasets/source.png \
   --debug \
   --depth_max 2050.0 \
   --camera_config configs/photoneo_camera_config.json
@@ -68,6 +86,10 @@ python run_matcher.py \
 ### 필수 인자
 - `--source`: 첫 번째 이미지 경로 (기본값: datasets/source.png)
 - `--target`: 두 번째 이미지 경로 (기본값: datasets/target.png)
+
+**Texture와 Depth 분리 사용 시:**
+- `--target_texture`: Target texture 이미지 경로 (매칭용, 기본값: datasets/target_texture.png)
+- `--target_depth`: Target depth 이미지 경로 (depth 계산용, 기본값: datasets/target_depth.tif)
 
 ### 선택적 인자
 - `--output_dir`: 결과 저장 디렉토리 (기본값: output)
@@ -92,6 +114,17 @@ python run_matcher.py \
 - **채널**: RGB 또는 그레이스케일 (자동 변환)
 - **Depth Map**: 32비트 TIFF 파일 지원 (PIL을 통한 로드)
 
+### Texture와 Depth 분리 사용
+**Texture 이미지 (--target_texture):**
+- **용도**: Roma 매칭에 사용되는 이미지
+- **권장 형식**: RGB 이미지 (JPG, PNG)
+- **특징**: 매칭 성능 향상을 위해 명확한 특징점이 있는 이미지 권장
+
+**Depth 이미지 (--target_depth):**
+- **용도**: 3D 포인트 계산에 사용되는 depth map
+- **권장 형식**: 32비트 TIFF 파일
+- **특징**: depth_max 값보다 큰 영역은 texture 이미지 값으로 보완됨
+
 ### 카메라 설정 파일 (선택사항)
 - **형식**: JSON
 - **용도**: 카메라 내부 파라미터, 왜곡 계수, 이미지 해상도 설정
@@ -104,7 +137,9 @@ datasets/
 ├── source.png
 ├── source2.png
 ├── target.png
-└── target2.tif
+├── target2.tif
+├── target_texture.jpg      # Texture 이미지 (매칭용)
+└── target_depth.tif        # Depth 이미지 (3D 계산용)
 
 configs/
 └── photoneo_camera_config.json
