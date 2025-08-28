@@ -906,7 +906,7 @@ class Matcher:
             # 4. 결과 시각화
             if self.config["debug_mode"]:
                 self.visualize_results(
-                    target_texture=target_image if texture_exist else None,
+                    target_texture=target_clipped if texture_exist else None,
                     target_depth=target_depth,
                     source_image=source_image,
                     plane_normal=plane_normal,
