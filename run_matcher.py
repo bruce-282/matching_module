@@ -61,7 +61,7 @@ def main():
     parser.add_argument(
         "--ransac_reproj_threshold",
         type=float,
-        default=30.0,
+        default=25.0,
         help="RANSAC 재투영 임계값",
     )
     parser.add_argument(
@@ -189,3 +189,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# python run_matcher.py --source datasets/source5.png --target_depth datasets/20250909_152152_match_depth.tif --target_texture datasets/20250909_152152_match_texture.png   --depth_max 2100.0 --camera_config configs/photoneo_camera_config.json --debug
