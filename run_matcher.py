@@ -8,7 +8,7 @@ from pathlib import Path
 import argparse
 import warnings
 import logging
-import json
+import yaml
 
 # torchvision 경고 숨기기
 warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
@@ -27,20 +27,20 @@ def main():
         "--config_path",
         type=str,
         required=True,
-        help="설정 파일 경로 (JSON)",
+        help="설정 파일 경로 (YAML)",
     )
 
     args = parser.parse_args()
     
-    # 설정 파일 로드
+    # 설정 파일 로드 (YAML)
     try:
         with open(args.config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
+            config = yaml.safe_load(f)
     except FileNotFoundError:
         print(f"오류: 설정 파일을 찾을 수 없습니다: {args.config_path}")
         return
-    except json.JSONDecodeError as e:
-        print(f"오류: 설정 파일 JSON 파싱 실패: {e}")
+    except yaml.YAMLError as e:
+        print(f"오류: YAML 파일 파싱 실패: {e}")
         return
 
     # 로그 레벨 설정
