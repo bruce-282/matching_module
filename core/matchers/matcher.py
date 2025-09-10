@@ -129,17 +129,17 @@ class Matcher:
         logger.info(f"모델 초기화 완료 (소요시간: {model_init_time:.3f}초)")
         self.camera = None
         # Camera 객체 생성 및 이미지 undistortion
-        # 설정에서 카메라 설정 파일이 있으면 사용, 없으면 기본 카메라 사용
-        camera_config_path = self.config["camera_config_path"]
-        if camera_config_path:
+        # YAML 설정에서 카메라 파라미터 직접 읽기
+        if "camera_intrinsics" in self.config and "camera_distortions" in self.config:
             try:
-                self.camera = create_camera_from_config(camera_config_path)
-                logger.info(f"설정 파일에서 카메라 생성: {camera_config_path}")
+                from core.utils.io_utils import create_camera_from_yaml_config
+                self.camera = create_camera_from_yaml_config(self.config)
+                logger.info("YAML 설정에서 카메라 생성 완료")
             except Exception as e:
-                logger.error(f"카메라 설정 파일 로드 실패, 기본 카메라 사용: {e}")
+                logger.error(f"YAML 카메라 설정 로드 실패: {e}")
                 raise e
         else:
-            logger.error("카메라 설정 파일이 없습니다.")
+            logger.error("YAML 설정에 camera_intrinsics 또는 camera_distortions가 없습니다.")
             raise ValueError("카메라 설정 파일이 없습니다.")
 
     def scale_keypoints(self, kpts: torch.Tensor, scale: np.ndarray) -> torch.Tensor:

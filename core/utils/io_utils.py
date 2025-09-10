@@ -3,6 +3,7 @@
 """
 
 import json
+import yaml
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
@@ -146,4 +147,62 @@ def create_camera_from_config(config_path: str):
 
     except Exception as e:
         logger.error(f"Camera 객체 생성 실패: {e}")
+        raise e
+
+
+def create_camera_from_yaml_config(config: Dict[str, Any]):
+    """
+    YAML 설정에서 Camera 객체를 생성합니다.
+
+    Args:
+        config: YAML 설정 딕셔너리 (camera_intrinsics, camera_distortions 포함)
+
+    Returns:
+        Camera 객체
+
+    Raises:
+        KeyError: 필수 키가 없을 때
+        ValueError: 파라미터 형식이 잘못되었을 때
+    """
+    from .camera_utils import Camera
+
+    try:
+        # 카메라 내부 파라미터 확인
+        if "camera_intrinsics" not in config:
+            raise KeyError("'camera_intrinsics' 키가 설정에 없습니다.")
+        
+        if "camera_distortions" not in config:
+            raise KeyError("'camera_distortions' 키가 설정에 없습니다.")
+
+        intrinsics = config["camera_intrinsics"]
+        distortions = config["camera_distortions"]
+
+        # 내부 파라미터 매트릭스 생성
+        intrinsic_matrix = np.array([
+            [intrinsics["fx"], 0, intrinsics["cx"]],
+            [0, intrinsics["fy"], intrinsics["cy"]],
+            [0, 0, 1]
+        ], dtype=np.float32)
+
+        # 왜곡 계수 배열 생성
+        distortion_coeffs = np.array([
+            distortions["k1"], distortions["k2"], 
+            distortions["p1"], distortions["p2"], 
+            distortions["k3"]
+        ], dtype=np.float32)
+
+        # 이미지 크기 추출 (기본값 제공)
+        if "image_size" in config:
+            image_size = (config["image_size"]["width"], config["image_size"]["height"])
+        else:
+            raise KeyError("'image_size'가 설정에 없습니다.")
+
+        # Camera 객체 생성
+        camera = Camera(intrinsic_matrix, distortion_coeffs, image_size)
+
+        logger.info("YAML 설정에서 Camera 객체 생성 완료")
+        return camera
+
+    except Exception as e:
+        logger.error(f"YAML 설정에서 Camera 객체 생성 실패: {e}")
         raise e
