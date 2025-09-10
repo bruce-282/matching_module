@@ -406,7 +406,7 @@ class Matcher:
         source_image: np.ndarray = None,
         plane_normal: np.ndarray = None,
         depth_result: np.ndarray = None,
-        image_path: Path = None,
+        result_image_name: str = "",
         matches_result: Dict[str, Any] = None,
         ransac_result: Optional[Dict[str, Any]] = None,
         camera: Camera = None,
@@ -428,7 +428,6 @@ class Matcher:
         output_path = Path(output_dir)
         output_path.mkdir(exist_ok=True)
 
-        image0_name = Path(image_path).stem
         # 1. 원본 Roma 매칭 결과 시각화 (디버그 모드에서만)
 
         logger.debug("원본 Roma 매칭 결과 시각화...")
@@ -444,7 +443,7 @@ class Matcher:
             matches_result["keypoints0"],
             matches_result["keypoints1"],
             matches_result["confidence"],
-            str(output_path / f"{image0_name}_matches_original.png"),
+            str(output_path / f"{result_image_name}_matches_original.png"),
             confidence_threshold=self.config["confidence_threshold"],
         )
 
@@ -457,7 +456,7 @@ class Matcher:
                 ransac_result["filtered_kpts0"],
                 ransac_result["filtered_kpts1"],
                 ransac_result["filtered_conf"],
-                str(output_path / f"{image0_name}_matches_ransac_filtered.png"),
+                str(output_path / f"{result_image_name}_matches_ransac_filtered.png"),
                 confidence_threshold=self.config["confidence_threshold"],
             )
 
@@ -497,17 +496,17 @@ class Matcher:
                     pcd.scale(1000.0, center=[0, 0, 0])
 
                     o3d.io.write_point_cloud(
-                        output_path / f"{image0_name}_with_normal.ply",
+                        output_path / f"{result_image_name}_with_normal.ply",
                         pcd,
                     )
                     logger.debug(
-                        f"PLY 파일 저장: {output_path / f'{image0_name}_with_normal.ply'}"
+                        f"PLY 파일 저장: {output_path / f'{result_image_name}_with_normal.ply'}"
                     )
 
                     if warp_result[0] is not None:
                         # 변환된 이미지를 파일로 저장
                         output_file = str(
-                            output_path / f"{image0_name}_warped_overlapped.png"
+                            output_path / f"{result_image_name}_warped_overlapped.png"
                         )
                         cv2.imwrite(
                             output_file, cv2.cvtColor(warp_result[0], cv2.COLOR_RGB2BGR)
@@ -520,8 +519,8 @@ class Matcher:
 
     def calculate_anchor_points(
         self,
-        image0_origin: np.ndarray,
-        image1_origin: np.ndarray,
+        target_image: np.ndarray,
+        source_image: np.ndarray,
         ransac_result: Dict[str, Any],
     ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """
@@ -535,14 +534,15 @@ class Matcher:
         Returns:
             계산된 포인트 좌표 (x1, y1, x2, y2, point1_2d, point2_2d) 또는 None
         """
+        
         if ransac_result["homography"] is not None:
-            img0 = image0_origin
-            img1 = image1_origin
+            img0 = target_image
+            img1 = source_image
 
-            if img0 is not None and img1 is not None:
+            if img0 is not None and source_image is not None:
                 # 포인트 위치 계산을 위한 간단한 변환
                 h0, w0, _ = img0.shape
-                h1, w1, _ = img1.shape
+                h1, w1, _ = source_image.shape
 
                 if "Homography" in ransac_result["geom_info"]:
                     H = np.array(ransac_result["geom_info"]["Homography"])
@@ -640,12 +640,9 @@ class Matcher:
         Returns:
             3D 포인트 정보 (point1_3d, point2_3d, point3_3d) 또는 None
         """
-        from pathlib import Path
-
-        target_depth_path = Path(target_depth_path)
 
         # PLY 파일이 아닌 경우 depth map 처리
-        if not is_ply_file(str(target_depth_path)) and target_depth_origin.dtype in [
+        if not is_ply_file(target_depth_path) and target_depth_origin.dtype in [
             np.float32,
             np.float64,
         ]:
@@ -669,7 +666,7 @@ class Matcher:
 
             # PLY 파일 로드
             logger.debug(f"PLY 파일에서 3D 정보를 추출하는 중: {target_depth_path}")
-            pcd = o3d.io.read_point_cloud(str(target_depth_path))
+            pcd = o3d.io.read_point_cloud(target_depth_path)
 
             if not pcd.has_points():
                 logger.warning("PLY 파일에 포인트가 없습니다.")
@@ -738,7 +735,7 @@ class Matcher:
             Roma 매칭 결과와 RANSAC 필터링 결과
         """
         # 경로 설정
-        target_texture_path = None or self.config["target_texture_path"]
+        target_texture_path = target_texture_path or self.config["target_texture_path"]
         target_depth_path = target_depth_path or self.config["target_depth_path"]
         source_image_path = source_image_path or self.config["source_image_path"]
         output_dir = output_dir or self.config["output_dir"]
@@ -753,8 +750,13 @@ class Matcher:
         logger.debug(f"RANSAC 신뢰도: {self.config['ransac_confidence']}")
         logger.debug(f"디버그 모드: {self.config['debug_mode']}")
 
+        # for output path
+        self.target_texture_name = Path(target_texture_path).stem
+        self.target_depth_name = Path(target_depth_path).stem
+        self.source_image_name = Path(source_image_path).stem
+        self.output_dir = output_dir
+
         try:
-            # 1. Texture 이미지 로드 (매칭용)
             def load_image(path):
                 image = read_image(path)
                 if self.config["image_undistortion"]:
@@ -792,10 +794,10 @@ class Matcher:
                 output_path.mkdir(exist_ok=True)
 
                 result_points_2d = self.calculate_anchor_points(
-                    target_image, source_image, ransac_result
+                    target_image=target_image, source_image=source_image, ransac_result=ransac_result
                 )
                 result1_2d, result2_2d, result3_2d = result_points_2d
-
+          
                 if (
                     result1_2d is not None
                     and result2_2d is not None
@@ -911,9 +913,7 @@ class Matcher:
                     source_image=source_image,
                     plane_normal=plane_normal,
                     depth_result=depth_result,
-                    image_path=Path(
-                        target_texture_path if texture_exist else target_depth_path
-                    ),
+                    result_image_name=self.target_texture_name if texture_exist else self.target_depth_name,
                     matches_result=matches_result,
                     ransac_result=ransac_result,
                     camera=self.camera,

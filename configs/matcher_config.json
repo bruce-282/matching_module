@@ -1,0 +1,17 @@
+{
+    "source_image_path": "datasets/source6.png",
+    "input_dir": "datasets",
+    "output_dir": "output",
+    "max_keypoints": 2000,
+    "ransac_method": "CV2_USAC_MAGSAC",
+    "ransac_reproj_threshold": 25.0,
+    "ransac_confidence": 0.9999,
+    "debug_mode": true,
+    "offset_pointL": [0.5, 0.9],
+    "offset_pointR": [1.15, 0.9],
+    "offset_pointU": [0.78, 0.4],
+    "point_radius": 25,
+    "depth_max": 2100.0,
+    "camera_config_path": "configs/photoneo_camera_config.json",
+    "image_undistortion": true
+}

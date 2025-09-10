@@ -18,7 +18,7 @@ from PIL import Image
 
 # 프로젝트 모듈 import
 sys.path.append(str(Path(__file__).parent))
-from core.utils.camera_utils import create_default_camera, undistort_image
+from core.utils.camera_utils import create_default_camera
 
 # 로깅 설정
 logging.basicConfig(

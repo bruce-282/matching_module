@@ -8,6 +8,7 @@ from pathlib import Path
 import argparse
 import warnings
 import logging
+import json
 
 # torchvision 경고 숨기기
 warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
@@ -23,156 +24,95 @@ def main():
     """메인 함수"""
     parser = argparse.ArgumentParser(description="Roma 매칭 + RANSAC 필터링")
     parser.add_argument(
-        "--source",
+        "--config_path",
         type=str,
-        default="datasets/source.png",
-        help="첫 번째 이미지 경로",
-    )
-    parser.add_argument(
-        "--target_texture",
-        type=str,
-        default="",
-        help="Target texture 이미지 경로 (매칭용)",
-    )
-    parser.add_argument(
-        "--target_depth",
-        type=str,
-        default="datasets/target_depth.tif",
-        help="Target depth 이미지 경로 (depth 계산용)",
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="output",
-        help="결과 저장 디렉토리",
-    )
-    parser.add_argument(
-        "--max_keypoints",
-        type=int,
-        default=2000,
-        help="최대 키포인트 수",
-    )
-    parser.add_argument(
-        "--ransac_method",
-        type=str,
-        default="CV2_USAC_MAGSAC",
-        help="RANSAC 메서드",
-    )
-    parser.add_argument(
-        "--ransac_reproj_threshold",
-        type=float,
-        default=25.0,
-        help="RANSAC 재투영 임계값",
-    )
-    parser.add_argument(
-        "--ransac_confidence",
-        type=float,
-        default=0.9999,
-        help="RANSAC 신뢰도",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="디버그 모드 활성화 (파일 저장)",
-    )
-    parser.add_argument(
-        "--offset_pointL_x",
-        type=float,
-        default=0.5,
-        help="왼쪽 포인트 X 좌표 비율 (0.0 ~ 1.0)",
-    )
-    parser.add_argument(
-        "--offset_pointL_y",
-        type=float,
-        default=0.89,
-        help="왼쪽 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
-    )
-    parser.add_argument(
-        "--offset_pointR_x",
-        type=float,
-        default=1.38,
-        help="오른쪽 포인트 X 좌표 비율 (0.0 ~ 1.0)",
-    )
-    parser.add_argument(
-        "--offset_pointR_y",
-        type=float,
-        default=0.89,
-        help="오른쪽 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
-    )
-    parser.add_argument(
-        "--offset_pointU_x",
-        type=float,
-        default=0.9,
-        help="위쪽 포인트 X 좌표 비율 (0.0 ~ 1.0)",
-    )
-    parser.add_argument(
-        "--offset_pointU_y",
-        type=float,
-        default=0.6,
-        help="위쪽 포인트 Y 좌표 비율 (0.0 ~ 1.0)",
-    )
-    parser.add_argument(
-        "--point_radius",
-        type=int,
-        default=25,
-        help="포인트 반지름",
-    )
-    parser.add_argument(
-        "--depth_max",
-        type=float,
-        default=2000.0,
-        help="Depth map 최대 값 (기본값: 2000.0)",
-    )
-    parser.add_argument(
-        "--camera_config",
-        type=str,
-        help="카메라 설정 파일 경로 (JSON)",
-    )
-    parser.add_argument(
-        "--image_undistortion",
-        type=bool,
-        default=True,
-        help="이미지 왜곡 보정 활성화",
+        required=True,
+        help="설정 파일 경로 (JSON)",
     )
 
     args = parser.parse_args()
+    
+    # 설정 파일 로드
+    try:
+        with open(args.config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        print(f"오류: 설정 파일을 찾을 수 없습니다: {args.config_path}")
+        return
+    except json.JSONDecodeError as e:
+        print(f"오류: 설정 파일 JSON 파싱 실패: {e}")
+        return
 
     # 로그 레벨 설정
-    if args.debug:
+    if config.get("debug_mode", False):
         logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
     else:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-
-    # Matcher 설정
-    config = {
-        "target_texture_path": args.target_texture,
-        "target_depth_path": args.target_depth,
-        "source_image_path": args.source,
-        "output_dir": args.output_dir,
-        "max_keypoints": args.max_keypoints,
-        "ransac_method": args.ransac_method,
-        "ransac_reproj_threshold": args.ransac_reproj_threshold,
-        "ransac_confidence": args.ransac_confidence,
-        "debug_mode": args.debug,
-        "offset_pointL": (args.offset_pointL_x, args.offset_pointL_y),
-        "offset_pointR": (args.offset_pointR_x, args.offset_pointR_y),
-        "offset_pointU": (args.offset_pointU_x, args.offset_pointU_y),
-        "point_radius": args.point_radius,
-        "depth_max": args.depth_max,
-        "camera_config_path": args.camera_config,
-        "image_undistortion": args.image_undistortion,
-    }
 
     # Matcher 인스턴스 생성
     matcher = Matcher(config)
 
     # 파이프라인 실행
-    matches_result, ransac_result = matcher.run_pipeline(
-        target_texture_path=args.target_texture,
-        target_depth_path=args.target_depth,
-        source_image_path=args.source,
-        output_dir=args.output_dir,
-    )
+    # 폴더에서 모든 depth.tif와 texture.png 쌍 찾기
+    import glob
+    import os
+
+    input_dir = config.get("input_dir", "datasets")
+    
+    # 입력 폴더에서 모든 depth.tif 파일 찾기
+    depth_files = glob.glob(os.path.join(input_dir, "*_depth.tif"))
+
+    if not depth_files:
+        print(f"경고: {input_dir}에서 *_depth.tif 파일을 찾을 수 없습니다.")
+        return
+
+    print(f"발견된 depth 파일: {len(depth_files)}개")
+
+    # 각 depth 파일에 대해 매칭 실행
+    matches_result = None
+    ransac_result = None
+
+    for depth_file in depth_files:
+        # 파일명에서 폴더이름 추출
+        base_name = os.path.basename(depth_file).replace("_depth.tif", "")
+        texture_file = os.path.join(input_dir, f"{base_name}_texture.png")
+
+        print(f"\n파일 검색 중:")
+        print(f"  Depth 파일: {depth_file}")
+        print(f"  Base name: {base_name}")
+        print(f"  Texture 파일: {texture_file}")
+        print(f"  Texture 파일 존재: {os.path.exists(texture_file)}")
+
+        # texture 파일이 존재하는지 확인
+        if not os.path.exists(texture_file):
+            print(f"경고: {texture_file} 파일이 없습니다. 건너뜁니다.")
+            continue
+
+        print(f"\n처리 중: {base_name}")
+        print(f"  Depth: {depth_file}")
+        print(f"  Texture: {texture_file}")
+
+        # 각 쌍에 대해 별도 출력 디렉토리 생성
+        output_dir = config.get("output_dir", "output")
+        os.makedirs(output_dir, exist_ok=True)
+
+        try:
+            print(f"  run_pipeline 호출:")
+            print(f"    target_texture_path: {texture_file}")
+            print(f"    target_depth_path: {depth_file}")
+            print(f"    source_image_path: {config.get('source_image_path', 'datasets/source.png')}")
+            print(f"    output_dir: {output_dir}")
+
+            matches_result, ransac_result = matcher.run_pipeline(
+                target_texture_path=texture_file,
+                target_depth_path=depth_file,
+                source_image_path=config.get("source_image_path", "datasets/source.png"),
+                output_dir=output_dir,
+            )
+            print(f"  ✓ 완료: {base_name}")
+        except Exception as e:
+            print(f"  ✗ 오류: {base_name} - {e}")
+            continue
 
     if matches_result is not None:
         print("\n=== 실행 완료 ===")
@@ -190,4 +130,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# python run_matcher.py --source datasets/source5.png --target_depth datasets/20250909_152152_match_depth.tif --target_texture datasets/20250909_152152_match_texture.png   --depth_max 2100.0 --camera_config configs/photoneo_camera_config.json --debug
+# python run_matcher.py --config_path configs/matcher_config.json
