@@ -846,16 +846,16 @@ class Matcher:
 
             logger.debug(f"Plane normal: {plane_normal}")
 
-                # 3D 포인트 저장
-            save_points_to_yaml(
-                    Path(target_depth_path), target_depth.shape[:2],
-                    result1_2d, result2_2d, result3_2d,
-                    result1_3d, result2_3d, result3_3d, plane_normal, self.output_path
-            )   
-            logger.info("포인트 위치가 YAML 파일로 저장되었습니다.")
-
             # 4. 결과 시각화
             if self.config["debug_mode"]:
+
+                save_points_to_yaml(
+                        Path(target_depth_path), target_depth.shape[:2],
+                        result1_2d, result2_2d, result3_2d,
+                        result1_3d, result2_3d, result3_3d, plane_normal, self.output_path
+                )   
+                logger.info("포인트 위치가 YAML 파일로 저장되었습니다.")
+
                 self.visualize_results(
                     target_texture=target_clipped if texture_exist else None,
                     target_depth=target_depth,
