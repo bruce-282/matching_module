@@ -97,16 +97,25 @@ def main():
         os.makedirs(output_dir, exist_ok=True)
 
         try:
+            # 이미지 미리 로드 (undistortion 제외)
+            print(f"  이미지 로딩 중...")
+            from core.utils.image_utils import read_image
+            target_texture = read_image(texture_file)
+            target_depth = read_image(depth_file)
+            source_image = read_image(config.get("source_image_path", "datasets/source.png"))
+            
             print(f"  run_pipeline 호출:")
-            print(f"    target_texture_path: {texture_file}")
-            print(f"    target_depth_path: {depth_file}")
-            print(f"    source_image_path: {config.get('source_image_path', 'datasets/source.png')}")
+            print(f"    target_texture: {target_texture.shape}")
+            print(f"    target_depth: {target_depth.shape}")
+            print(f"    source_image: {source_image.shape}")
             print(f"    output_dir: {output_dir}")
 
             result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(
+                target_texture=target_texture,
+                target_depth=target_depth,
+                source_image=source_image,
                 target_texture_path=texture_file,
                 target_depth_path=depth_file,
-                source_image_path=config.get("source_image_path", "datasets/source.png"),
                 output_dir=output_dir,
             )
         except Exception as e:

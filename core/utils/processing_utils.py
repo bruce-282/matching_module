@@ -355,9 +355,9 @@ def wrap_images(
     img1: np.ndarray,
     geo_info: Optional[Dict[str, List[float]]],
     geom_type: str,
-    offset_pointL: Tuple[float, float],
-    offset_pointR: Tuple[float, float],
-    offset_pointU: Tuple[float, float],
+    pointL_pos: Dict[str, float],
+    pointR_pos: Dict[str, float],
+    pointU_pos: Dict[str, float],
     point_radius: int = 10,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
@@ -389,48 +389,48 @@ def wrap_images(
             rectified_image1 = cv2.warpPerspective(img1, H_inv, (w0, h0))
 
             # Apply H_inv transformation to 2D points using user-defined ratios
-            offset_point1_coords = np.array(
+            point1_coords = np.array(
                 [
                     [
-                        w1 * offset_pointL[0],
-                        h1 * offset_pointL[1],
+                        w1 * pointL_pos["x_ratio"],
+                        h1 * pointL_pos["y_ratio"],
                         1,
                     ]
                 ],
                 dtype=np.float32,
             )  # Homogeneous coordinates for first point
 
-            transformed_point = H_inv @ offset_point1_coords.T
+            transformed_point = H_inv @ point1_coords.T
             transformed_point = (
                 transformed_point / transformed_point[2]
             )  # Normalize homogeneous coordinates
 
-            offset_point2_coords = np.array(
+            point2_coords = np.array(
                 [
                     [
-                        w1 * offset_pointR[0],
-                        h1 * offset_pointR[1],
+                        w1 * pointR_pos["x_ratio"],
+                        h1 * pointR_pos["y_ratio"],
                         1,
                     ]
                 ],
                 dtype=np.float32,
             )
-            transformed_point_2 = H_inv @ offset_point2_coords.T
+            transformed_point_2 = H_inv @ point2_coords.T
             transformed_point_2 = (
                 transformed_point_2 / transformed_point_2[2]
             )  # Normalize homogeneous coordinates
 
-            offset_point3_coords = np.array(
+            point3_coords = np.array(
                 [
                     [
-                        w1 * offset_pointU[0],
-                        h1 * offset_pointU[1],
+                        w1 * pointU_pos["x_ratio"],
+                        h1 * pointU_pos["y_ratio"],
                         1,
                     ]
                 ],
                 dtype=np.float32,
             )
-            transformed_point_3 = H_inv @ offset_point3_coords.T
+            transformed_point_3 = H_inv @ point3_coords.T
             transformed_point_3 = (
                 transformed_point_3 / transformed_point_3[2]
             )  # Normalize homogeneous coordinates

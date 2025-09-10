@@ -7,9 +7,20 @@
     "ransac_reproj_threshold": 20.0,
     "ransac_confidence": 0.9999,
     "debug_mode": true,
-    "offset_pointL": [0.24, 0.9],
-    "offset_pointR": [0.75, 0.89],
-    "offset_pointU": [0.485, 0.4],
+    
+    "pointL_pos": {
+        "x_ratio": 0.24,
+        "y_ratio": 0.9
+    },
+    "pointR_pos": {
+        "x_ratio": 0.75,
+        "y_ratio": 0.89
+    },
+    "pointU_pos": {
+        "x_ratio": 0.485,
+        "y_ratio": 0.4
+    },
+
     "point_radius": 25,
     "depth_max": 2100.0,
     "camera_config_path": "configs/photoneo_camera_config.json",

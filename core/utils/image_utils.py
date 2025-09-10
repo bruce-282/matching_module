@@ -35,20 +35,7 @@ def process_depth_map(
 
     # Depth max 값보다 큰 값은 texture 값으로 대체
     if texture_image is not None:
-        # texture 이미지가 3채널인 경우 그대로 사용, 2채널인 경우 RGB로 변환
-        # if len(texture_image.shape) == 3:
-        #     texture_rgb = texture_image
-        # else:
-        #     # 그레이스케일을 RGB로 변환
-        #     texture_rgb = cv2.cvtColor(texture_image, cv2.COLOR_GRAY2RGB)
 
-        # depth_image가 3차원인 경우 첫 번째 채널만 사용
-        # if len(depth_image.shape) == 3:
-        #     depth_image_2d = depth_image[:, :, 0].copy()
-        # else:
-        #     depth_image_2d = depth_image.copy()
-
-        # depth_max 초과하는 부분을 texture 값으로 대체
         processed = texture_image.copy()
         mask = (depth_image > depth_max) | (depth_image == 0.0)
         processed[mask] = 0

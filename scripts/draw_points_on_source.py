@@ -35,9 +35,9 @@ def main():
 
     # 필요한 설정값들 추출
     source_image_path = config.get("source_image_path")
-    offset_pointL = config.get("offset_pointL", [0.5, 0.89])
-    offset_pointR = config.get("offset_pointR", [1.2, 0.88])
-    offset_pointU = config.get("offset_pointU", [0.8, 0.4])
+    pointL_pos = config.get("pointL_pos", {"x_ratio": 0.5, "y_ratio": 0.89})
+    pointR_pos = config.get("pointR_pos", {"x_ratio": 1.2, "y_ratio": 0.88})
+    pointU_pos = config.get("pointU_pos", {"x_ratio": 0.8, "y_ratio": 0.4})
     point_radius = config.get("point_radius", 25)
     output_dir = config.get("output_dir", "output")
     
@@ -60,9 +60,9 @@ def main():
     
     # 포인트 좌표 계산 (상대 좌표를 절대 좌표로 변환)
     points = [
-        (int(offset_pointL[0] * w), int(offset_pointL[1] * h)),
-        (int(offset_pointR[0] * w), int(offset_pointR[1] * h)), 
-        (int(offset_pointU[0] * w), int(offset_pointU[1] * h))
+        (int(pointL_pos["x_ratio"] * w), int(pointL_pos["y_ratio"] * h)),
+        (int(pointR_pos["x_ratio"] * w), int(pointR_pos["y_ratio"] * h)), 
+        (int(pointU_pos["x_ratio"] * w), int(pointU_pos["y_ratio"] * h))
     ]
     
     # 원이 이미지 범위를 벗어날 경우를 위한 패딩 계산

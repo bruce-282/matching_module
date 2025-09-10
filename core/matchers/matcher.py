@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-통합 매처 클래스 - Roma 매칭 + RANSAC 필터링
+통합 매처 클래스 - 매칭 + RANSAC 필터링
 """
 
 from re import L, S, T
@@ -24,20 +24,11 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
 logger = logging.getLogger(__name__)
 
 
-# 이미지 변환 관련 상수들
-DEFAULT_OFFSET_POINTL_X_RATIO = 0.5  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINTL_Y_RATIO = 0.89  # 이미지 높이의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINTR_X_RATIO = 1.38  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINTR_Y_RATIO = 0.89  # 이미지 높이의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINTU_X_RATIO = 0.9  # 이미지 너비의 비율 (0.0 ~ 1.0)
-DEFAULT_OFFSET_POINTU_Y_RATIO = 0.6  # 이미지 높이의 비율 (0.0 ~ 1.0)
-DEFAULT_POINT_RADIUS = 25  # 포인트 반지름
-
 # 프로젝트 루트를 Python 경로에 추가
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.matchers.roma import Roma
+from core.matchers.models.roma import Roma
 from core.utils.image_utils import resize_image, read_image, process_depth_map
 from core.utils.viz_utils import visualize_matches
 from core.utils.processing_utils import filter_matches, wrap_images, save_points_to_yaml
@@ -70,7 +61,7 @@ class Matcher:
         self.default_config = {
             # 출력 설정
             "output_dir": "output",
-            # Roma 매칭 설정
+            # 매칭 설정
             "max_keypoints": 2000,
             "match_threshold": 0.2,
             "model_name": "minima_roma.pth",
@@ -97,19 +88,19 @@ class Matcher:
             # 디버그 모드
             "debug_mode": False,
             # 이미지 변환 포인트 설정
-            "offset_pointL": (
-                DEFAULT_OFFSET_POINTL_X_RATIO,
-                DEFAULT_OFFSET_POINTL_Y_RATIO,
-            ),
-            "offset_pointR": (
-                DEFAULT_OFFSET_POINTR_X_RATIO,
-                DEFAULT_OFFSET_POINTR_Y_RATIO,
-            ),
-            "offset_pointU": (
-                DEFAULT_OFFSET_POINTU_X_RATIO,
-                DEFAULT_OFFSET_POINTU_Y_RATIO,
-            ),
-            "point_radius": DEFAULT_POINT_RADIUS,
+            "pointL_pos": {
+                "x_ratio": 0.5,
+                "y_ratio": 0.89,
+            },
+            "pointR_pos": {
+                "x_ratio": 1.38,
+                "y_ratio": 0.89,
+            },
+            "pointU_pos": {
+                "x_ratio": 0.9,
+                "y_ratio": 0.6,
+            },
+            "point_radius": 25,
         }
 
         # 사용자 설정으로 기본 설정 업데이트
@@ -126,16 +117,16 @@ class Matcher:
         self.model_init_time = 0.0
         self.matching_time = 0.0
 
-        # Roma 모델 초기화
-        logger.debug("Roma 모델을 초기화하는 중...")
+        # 모델 초기화
+        logger.debug("Matcher 모델을 초기화하는 중...")
         init_start_time = time.time()
         conf = Roma.default_conf.copy()
         conf["max_keypoints"] = self.config["max_keypoints"]
         conf["match_threshold"] = self.config["match_threshold"]
         conf["model_name"] = self.config["model_name"]
-        self.roma_model = Roma(conf)
-        self.model_init_time = time.time() - init_start_time
-        logger.info(f"모델 초기화 완료 (소요시간: {self.model_init_time:.3f}초)")
+        self.model = Roma(conf)
+        model_init_time = time.time() - init_start_time
+        logger.info(f"모델 초기화 완료 (소요시간: {model_init_time:.3f}초)")
         self.camera = None
         # Camera 객체 생성 및 이미지 undistortion
         # 설정에서 카메라 설정 파일이 있으면 사용, 없으면 기본 카메라 사용
@@ -225,13 +216,13 @@ class Matcher:
 
         return image, scale
 
-    def run_roma_matching(
+    def run_matching(
         self,
         image0_origin: np.ndarray,
         image1_origin: np.ndarray,
     ) -> Dict[str, Any]:
         """
-        Roma 모델을 사용하여 이미지 매칭을 수행
+        이미지 매칭을 수행
 
         Args:
             image0_origin: 첫 번째 이미지 (NumPy 배열)
@@ -240,7 +231,7 @@ class Matcher:
         Returns:
             매칭 결과 딕셔너리
         """
-        logger.debug("=== Roma 매칭 시작 ===")
+        logger.debug("=== 매칭 시작 ===")
 
         # 전처리
         image0, scale0 = self._preprocess(
@@ -271,7 +262,7 @@ class Matcher:
         logger.debug("이미지 매칭을 실행하는 중...")
         matching_start_time = time.time()
         data = {"image0": image0, "image1": image1}
-        result = self.roma_model(data)
+        result = self.model(data)
         self.matching_time = time.time() - matching_start_time
 
         # 스케일 계산
@@ -284,7 +275,7 @@ class Matcher:
         keypoints0 = self.scale_keypoints(result["keypoints0"] + 0.5, s0) - 0.5
         keypoints1 = self.scale_keypoints(result["keypoints1"] + 0.5, s1) - 0.5
 
-        logger.info(f"Roma 매칭 완료! (매칭 시간: {self.matching_time:.3f}초)")
+        logger.info(f"매칭 완료! (매칭 시간: {self.matching_time:.3f}초)")
         logger.debug(f"매칭된 키포인트 수: {len(keypoints0)}")
         logger.debug(f"평균 신뢰도: {torch.mean(confidence).item():.3f}")
         logger.debug(f"최고 신뢰도: {torch.max(confidence).item():.3f}")
@@ -313,7 +304,7 @@ class Matcher:
         RANSAC 필터링 수행
 
         Args:
-            matches_result: Roma 매칭 결과
+            matches_result: 매칭 결과
             ransac_method: RANSAC 메서드
             ransac_reproj_threshold: RANSAC 재투영 임계값
             ransac_confidence: RANSAC 신뢰도
@@ -330,7 +321,7 @@ class Matcher:
         )
         ransac_confidence = ransac_confidence or self.config["ransac_confidence"]
 
-        # Roma 결과를 RANSAC 입력 형식으로 변환
+        # 결과를 RANSAC 입력 형식으로 변환
         pred = {
             "mkeypoints0_orig": matches_result["keypoints0"],
             "mkeypoints1_orig": matches_result["keypoints1"],
@@ -418,16 +409,16 @@ class Matcher:
         Args:
             image0_path: 첫 번째 이미지 경로
             image1_path: 두 번째 이미지 경로
-            matches_result: Roma 매칭 결과
+            matches_result: 매칭 결과
             ransac_result: RANSAC 필터링 결과
             output_dir: 출력 디렉토리
         """
         logger.debug("\n=== 결과 시각화 ===")
 
 
-        # 1. 원본 Roma 매칭 결과 시각화 (디버그 모드에서만)
+        # 1. 원본 매칭 결과 시각화 (디버그 모드에서만)
 
-        logger.debug("원본 Roma 매칭 결과 시각화...")
+        logger.debug("원본 매칭 결과 시각화...")
 
         if target_texture is not None:
             target_image = target_texture
@@ -468,9 +459,9 @@ class Matcher:
                         source_image,
                         ransac_result["geom_info"],
                         "Homography",
-                        offset_pointL=self.config["offset_pointL"],
-                        offset_pointR=self.config["offset_pointR"],
-                        offset_pointU=self.config["offset_pointU"],
+                        pointL_pos=self.config["pointL_pos"],
+                        pointR_pos=self.config["pointR_pos"],
+                        pointU_pos=self.config["pointU_pos"],
                         point_radius=self.config["point_radius"],
                     )
 
@@ -557,43 +548,43 @@ class Matcher:
                     logger.error("Homography 또는 Fundamental 행렬이 없습니다.")
 
                 # 포인트 변환 계산
-                offset_pointL_coords = np.array(
+                pointL_coords = np.array(
                     [
                         [
-                            w1 * self.config["offset_pointL"][0],
-                            h1 * self.config["offset_pointL"][1],
+                            w1 * self.config["pointL_pos"]["x_ratio"],
+                            h1 * self.config["pointL_pos"]["y_ratio"],
                             1,
                         ]
                     ],
                     dtype=np.float32,
                 )
-                transformed_point = transform_matrix @ offset_pointL_coords.T
+                transformed_point = transform_matrix @ pointL_coords.T
                 transformed_point = transformed_point / transformed_point[2]
 
-                offset_pointR_coords = np.array(
+                pointR_coords = np.array(
                     [
                         [
-                            w1 * self.config["offset_pointR"][0],
-                            h1 * self.config["offset_pointR"][1],
+                            w1 * self.config["pointR_pos"]["x_ratio"],
+                            h1 * self.config["pointR_pos"]["y_ratio"],
                             1,
                         ]
                     ],
                     dtype=np.float32,
                 )
-                transformed_point_2 = transform_matrix @ offset_pointR_coords.T
+                transformed_point_2 = transform_matrix @ pointR_coords.T
                 transformed_point_2 = transformed_point_2 / transformed_point_2[2]
 
-                offset_pointU_coords = np.array(
+                pointU_coords = np.array(
                     [
                         [
-                            w1 * self.config["offset_pointU"][0],
-                            h1 * self.config["offset_pointU"][1],
+                            w1 * self.config["pointU_pos"]["x_ratio"],
+                            h1 * self.config["pointU_pos"]["y_ratio"],
                             1,
                         ]
                     ],
                     dtype=np.float32,
                 )
-                transformed_point_3 = transform_matrix @ offset_pointU_coords.T
+                transformed_point_3 = transform_matrix @ pointU_coords.T
                 transformed_point_3 = transformed_point_3 / transformed_point_3[2]
 
                 x1, y1 = int(transformed_point[0][0]), int(transformed_point[1][0])
@@ -739,36 +730,45 @@ class Matcher:
         x = (point[0] - cx) * z / fx
         y = (point[1] - cy) * z / fy
         return np.array([x, y, z])
+    
+    def _load_and_undistort_image(self, path: str) -> np.ndarray:
+        """이미지 로드 및 undistortion"""
+        image = read_image(path)
+        if self.config["image_undistortion"]:
+            image = self.camera.undistort_image(image)
+        return image
 
     def run_pipeline(
         self,
+        target_texture: Optional[np.ndarray] = None,
+        target_depth: Optional[np.ndarray] = None,
+        source_image: Optional[np.ndarray] = None,
         target_texture_path: Optional[str] = None,
         target_depth_path: Optional[str] = None,
-        source_image_path: Optional[str] = None,
         output_dir: Optional[str] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         전체 파이프라인 실행
 
         Args:
-            target_texture_path: Target texture 이미지 경로 (매칭용)
-            target_depth_path: Target depth 이미지 경로 (depth 계산용)
-            source_image_path: Source 이미지 경로
+            target_texture: Target texture 이미지 (매칭용) - 이미 로드된 이미지
+            target_depth: Target depth 이미지 (depth 계산용) - 이미 로드된 이미지
+            source_image: Source 이미지 - 이미 로드된 이미지
+            target_texture_path: Target texture 이미지 경로 (debug mode 사용 시 사용)
+            target_depth_path: Target depth 이미지 경로 (debug mode 사용 시 사용)
             output_dir: 출력 디렉토리
 
         Returns:
-            Roma 매칭 결과와 RANSAC 필터링 결과
+            Tuple[result1_3d, result2_3d, result3_3d, plane_normal]
         """
         # 경로 설정
         target_texture_path = target_texture_path or self.config["target_texture_path"]
         target_depth_path = target_depth_path or self.config["target_depth_path"]
-        source_image_path = source_image_path or self.config["source_image_path"]
         output_dir = output_dir or self.config["output_dir"]
 
-        logger.debug("=== Roma 매칭 + RANSAC 필터링 시작 ===")
+        logger.debug("=== 매칭 + RANSAC 필터링 시작 ===")
         logger.debug(f"Target texture: {target_texture_path}")
         logger.debug(f"Target depth: {target_depth_path}")
-        logger.debug(f"Source image: {source_image_path}")
         logger.debug(f"출력 디렉토리: {output_dir}")
         logger.debug(f"최대 키포인트: {self.config['max_keypoints']}")
         logger.debug(f"RANSAC 재투영 임계값: {self.config['ransac_reproj_threshold']}")
@@ -778,22 +778,19 @@ class Matcher:
         # for output path
         self.target_texture_name = Path(target_texture_path).stem
         self.target_depth_name = Path(target_depth_path).stem
-        self.source_image_name = Path(source_image_path).stem
         self.output_path = Path(output_dir)
         self.output_path.mkdir(exist_ok=True)
 
         try:
-            def load_and_undistort_image(path):
-                image = read_image(path)
-                if self.config["image_undistortion"]:
-                    image = self.camera.undistort_image(image)
-                return image
-
-            target_depth = load_and_undistort_image(target_depth_path)
-
-            if target_texture_path:
+            if self.config["image_undistortion"]:
+                target_depth = self.camera.undistort_image(target_depth)
+            
+ 
+            if target_texture is not None:
                 texture_exist = True
-                target_image = load_and_undistort_image(target_texture_path)
+                target_image = target_texture
+                if self.config["image_undistortion"]:
+                    target_image = self.camera.undistort_image(target_image)
                 target_clipped = process_depth_map(
                     depth_image=target_depth,
                     texture_image=target_image,
@@ -807,9 +804,8 @@ class Matcher:
                     depth_max=self.config["depth_max"],
                 )
 
-            source_image = read_image(source_image_path)
 
-            matches_result = self.run_roma_matching(target_clipped, source_image)
+            matches_result = self.run_matching(target_clipped, source_image)
             
             ransac_result = self.run_ransac_filtering(matches_result)
 
@@ -873,12 +869,11 @@ class Matcher:
                 )
 
             # 전체 시간 요약
-            total_time = self.model_init_time + self.matching_time
+            total_time = self.matching_time
             if ransac_result:
                 total_time += ransac_result.get("filter_time", 0.0)
 
             logger.info("\n=== 파이프라인 완료 ===")
-            logger.info(f"모델 초기화 시간: {self.model_init_time:.3f}초")
             logger.info(f"매칭 시간: {self.matching_time:.3f}초")
             if ransac_result:
                 logger.info(
@@ -897,8 +892,8 @@ class Matcher:
     
     def cleanup(self):
         """메모리 정리"""
-        if hasattr(self, 'roma_model') and self.roma_model is not None:
-            del self.roma_model
-            self.roma_model = None
+        if hasattr(self, 'model') and self.model is not None:
+            del self.model
+            self.model = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
