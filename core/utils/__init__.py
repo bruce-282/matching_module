@@ -22,10 +22,12 @@ from .depth_utils import (
     point_cloud_to_depth_map,
     find_3d_from_2d_depthmap_robust,
     find_3d_from_2d_depthmap,
+    find_depth_from_2d_robust,
     get_pixels_in_radius,
     depth_estimation_mad,
     depth_estimation_histogram,
 )
+from .camera_utils import create_default_camera
 
 __all__ = [
     "load_image",
@@ -47,9 +49,11 @@ __all__ = [
     "point_cloud_to_depth_map",
     "find_3d_from_2d_depthmap_robust",
     "find_3d_from_2d_depthmap",
+    "find_depth_from_2d_robust",
     "get_pixels_in_radius",
     "depth_estimation_mad",
     "depth_estimation_histogram",
+    "create_default_camera",
 ]
 
 MODEL_REPO_ID = "Realcat/imcui_checkpoints"

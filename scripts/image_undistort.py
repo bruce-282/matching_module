@@ -17,8 +17,8 @@ from typing import Union, List
 from PIL import Image
 
 # 프로젝트 모듈 import
-sys.path.append(str(Path(__file__).parent))
-from core.utils.camera_utils import create_default_camera
+sys.path.append(str(Path(__file__).parent.parent))
+from core.utils import create_default_camera
 
 # 로깅 설정
 logging.basicConfig(
@@ -45,6 +45,12 @@ def undistort_single_image(
         input_path = Path(input_path)
         output_path = Path(output_path)
 
+        # 출력 경로가 디렉토리인 경우 파일명 생성
+        if output_path.is_dir() or not output_path.suffix:
+            # 입력 파일명에 _undistorted 추가
+            output_filename = f"{input_path.stem}_undistorted{input_path.suffix}"
+            output_path = output_path / output_filename
+        
         # 출력 디렉토리 생성
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -88,7 +94,14 @@ def undistort_single_image(
 
         # 이미지 저장
         logger.info(f"이미지 저장 중: {output_path}")
-        success = cv2.imwrite(str(output_path), undistorted_image)
+        
+        # TIFF 파일인 경우 압축 옵션 사용
+        if output_path.suffix.lower() in [".tif", ".tiff"]:
+            # OpenCV로 TIFF 무손실 압축 저장
+            success = cv2.imwrite(str(output_path), undistorted_image, [cv2.IMWRITE_TIFF_COMPRESSION, 0])
+        else:
+            # 일반 이미지는 OpenCV 사용
+            success = cv2.imwrite(str(output_path), undistorted_image)
 
         if success:
             logger.info(f"Undistortion 완료: {input_path} -> {output_path}")

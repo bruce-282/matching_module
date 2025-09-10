@@ -103,29 +103,26 @@ def main():
             print(f"    source_image_path: {config.get('source_image_path', 'datasets/source.png')}")
             print(f"    output_dir: {output_dir}")
 
-            matches_result, ransac_result = matcher.run_pipeline(
+            result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(
                 target_texture_path=texture_file,
                 target_depth_path=depth_file,
                 source_image_path=config.get("source_image_path", "datasets/source.png"),
                 output_dir=output_dir,
             )
-            print(f"  ✓ 완료: {base_name}")
         except Exception as e:
-            print(f"  ✗ 오류: {base_name} - {e}")
-            continue
+            print(f"Error: {base_name} - {e}")
+            return
 
-    if matches_result is not None:
-        print("\n=== 실행 완료 ===")
-        print(f"매칭 결과: {len(matches_result['keypoints0'])} 개 키포인트")
-        if ransac_result is not None:
-            print(
-                f"RANSAC 필터링 결과: {len(ransac_result['filtered_kpts0'])} 개 키포인트"
-            )
+        # 결과 출력
+        if all(x is not None for x in [result1_3d, result2_3d, result3_3d, plane_normal]):
+            print(f"✅ 매칭 성공 - {base_name}")
+            print(f"   Point L: {result1_3d}")
+            print(f"   Point R: {result2_3d}")
+            print(f"   Point U: {result3_3d}")
+            print(f"   Plane Normal: {plane_normal}")
         else:
-            print("RANSAC 필터링 실패")
-    else:
-        print("실행 실패")
-
+            print(f"❌ 매칭 실패 - {base_name}")
+    print("실행 완료")
 
 if __name__ == "__main__":
     main()

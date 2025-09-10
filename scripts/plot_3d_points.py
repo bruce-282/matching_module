@@ -115,7 +115,7 @@ def plot_3d_data(all_data, output_dir):
                         textcoords="offset points",
                         xytext=(0, 10),
                         ha="center",
-                        fontsize=10,
+                        fontsize=6,
                         fontweight="bold",
                     )
 
@@ -195,7 +195,7 @@ def create_error_bar_plot(data_type, coord_data, valid_indices, output_dir):
                     textcoords="offset points",
                     xytext=(0, 10),
                     ha="center",
-                    fontsize=10,
+                    fontsize=6,
                     fontweight="bold",
                 )
         else:
@@ -221,7 +221,7 @@ def create_error_bar_plot(data_type, coord_data, valid_indices, output_dir):
                     textcoords="offset points",
                     xytext=(0, 10),
                     ha="center",
-                    fontsize=10,
+                    fontsize=6,
                     fontweight="bold",
                 )
 

@@ -77,22 +77,21 @@ def point_cloud_to_depth_map(
         return None, None
 
 
-def find_3d_from_2d_depthmap_robust(
+def find_depth_from_2d_robust(
     depth_image: np.ndarray,
     pixel_2d: Tuple[int, int],
     radius: int = 3,
-) -> Optional[np.ndarray]:
+) -> Optional[float]:
     """
-    주변 픽셀의 평균을 사용한 robust한 3D 포인트 계산
+    주변 픽셀의 중앙값을 사용한 robust한 depth 값 계산
 
     Args:
         depth_image: depth map 이미지 (H, W)
-        intrinsic: 카메라 내부 파라미터 (3, 3)
         pixel_2d: 2D 픽셀 좌표 (u, v)
         radius: 주변 픽셀 반지름
 
     Returns:
-        3D 포인트 좌표 [x, y, z] 또는 None
+        depth 값 (float) 또는 None
     """
     u, v = pixel_2d
     h, w = depth_image.shape
@@ -113,17 +112,33 @@ def find_3d_from_2d_depthmap_robust(
         return None
 
     # 중앙값 사용 (outlier에 강함)
-    z = np.median(depths)
+    return float(np.median(depths))
 
-    # Back-projection
-    # fx, fy = intrinsic[0, 0], intrinsic[1, 1]
-    # cx, cy = intrinsic[0, 2], intrinsic[1, 2]
 
-    # x = (u - cx) * z / fx
-    # y = (v - cy) * z / fy
-    x = u
-    y = v
-    return np.array([x, y, z])
+def find_3d_from_2d_depthmap_robust(
+    depth_image: np.ndarray,
+    pixel_2d: Tuple[int, int],
+    radius: int = 3,
+) -> Optional[np.ndarray]:
+    """
+    주변 픽셀의 평균을 사용한 robust한 3D 포인트 계산 (하위 호환성용)
+
+    Args:
+        depth_image: depth map 이미지 (H, W)
+        pixel_2d: 2D 픽셀 좌표 (u, v)
+        radius: 주변 픽셀 반지름
+
+    Returns:
+        3D 포인트 좌표 [x, y, z] 또는 None
+    """
+    u, v = pixel_2d
+    z = find_depth_from_2d_robust(depth_image, pixel_2d, radius)
+    
+    if z is None:
+        return None
+    
+    # x, y는 픽셀 좌표 그대로 사용 (의미없음)
+    return np.array([u, v, z])
 
 
 def get_pixels_in_radius(
