@@ -892,8 +892,34 @@ class Matcher:
     
     def cleanup(self):
         """메모리 정리"""
+        logger.debug("메모리 정리 시작...")
+        
+        # 1. 모델 정리
         if hasattr(self, 'model') and self.model is not None:
+            logger.debug("모델 메모리 해제 중...")
             del self.model
             self.model = None
+        
+        # 2. 카메라 객체 정리
+        if hasattr(self, 'camera') and self.camera is not None:
+            logger.debug("카메라 객체 정리 중...")
+            del self.camera
+            self.camera = None
+        
+        # 3. 설정 정리
+        if hasattr(self, 'config'):
+            logger.debug("설정 정리 중...")
+            del self.config
+            self.config = None
+        
+        # 4. PyTorch 메모리 정리
         if torch.cuda.is_available():
+            logger.debug("CUDA 캐시 정리 중...")
             torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
+        # 5. Python 가비지 컬렉션 강제 실행
+        import gc
+        gc.collect()
+        
+        logger.debug("메모리 정리 완료")
