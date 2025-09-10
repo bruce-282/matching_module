@@ -7,7 +7,7 @@ from re import L, S, T
 import sys
 from pathlib import Path
 import numpy as np
-from core.utils.pcd_utils import compute_plane_normal
+from ..utils.pcd_utils import compute_plane_normal
 import cv2
 import time
 import torch
@@ -28,21 +28,16 @@ logger = logging.getLogger(__name__)
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.matchers.models.roma import Roma
-from core.utils.image_utils import resize_image, read_image, process_depth_map
-from core.utils.viz_utils import visualize_matches
-from core.utils.processing_utils import filter_matches, wrap_images, save_points_to_yaml
-from core.utils.pcd_utils import create_point_cloud_from_depth_image
-from core.utils.camera_utils import create_default_camera, undistort_image, Camera
-from core.utils.io_utils import (
-    create_camera_from_config,
-    extract_camera_params,
-    load_camera_config,
-)
-from core.utils import (
-    is_ply_file,
+from .models.roma import Roma
+from ..utils.image_utils import resize_image, read_image, process_depth_map
+from ..utils.viz_utils import visualize_matches
+from ..utils.processing_utils import filter_matches, wrap_images, save_points_to_yaml
+from ..utils.pcd_utils import create_point_cloud_from_depth_image
+from ..utils.camera_utils import create_default_camera, Camera
+
+from ..utils.pcd_utils import is_ply_file
+from ..utils.depth_utils import (
     point_cloud_to_depth_map,
-    find_3d_from_2d_depthmap_robust,
     find_depth_from_2d_robust,
 )
 
@@ -132,14 +127,17 @@ class Matcher:
         # YAML 설정에서 카메라 파라미터 직접 읽기
         if "camera_intrinsics" in self.config and "camera_distortions" in self.config:
             try:
-                from core.utils.io_utils import create_camera_from_yaml_config
+                from ..utils.io_utils import create_camera_from_yaml_config
+
                 self.camera = create_camera_from_yaml_config(self.config)
                 logger.info("YAML 설정에서 카메라 생성 완료")
             except Exception as e:
                 logger.error(f"YAML 카메라 설정 로드 실패: {e}")
                 raise e
         else:
-            logger.error("YAML 설정에 camera_intrinsics 또는 camera_distortions가 없습니다.")
+            logger.error(
+                "YAML 설정에 camera_intrinsics 또는 camera_distortions가 없습니다."
+            )
             raise ValueError("카메라 설정 파일이 없습니다.")
 
     def scale_keypoints(self, kpts: torch.Tensor, scale: np.ndarray) -> torch.Tensor:
@@ -415,7 +413,6 @@ class Matcher:
         """
         logger.debug("\n=== 결과 시각화 ===")
 
-
         # 1. 원본 매칭 결과 시각화 (디버그 모드에서만)
 
         logger.debug("원본 매칭 결과 시각화...")
@@ -444,7 +441,10 @@ class Matcher:
                 ransac_result["filtered_kpts0"],
                 ransac_result["filtered_kpts1"],
                 ransac_result["filtered_conf"],
-                str(self.output_path / f"{result_image_name}_matches_ransac_filtered.png"),
+                str(
+                    self.output_path
+                    / f"{result_image_name}_matches_ransac_filtered.png"
+                ),
                 confidence_threshold=self.config["confidence_threshold"],
             )
 
@@ -494,7 +494,8 @@ class Matcher:
                     if warp_result[0] is not None:
                         # 변환된 이미지를 파일로 저장
                         output_file = str(
-                            self.output_path / f"{result_image_name}_warped_overlapped.png"
+                            self.output_path
+                            / f"{result_image_name}_warped_overlapped.png"
                         )
                         cv2.imwrite(
                             output_file, cv2.cvtColor(warp_result[0], cv2.COLOR_RGB2BGR)
@@ -522,7 +523,7 @@ class Matcher:
         Returns:
             계산된 포인트 좌표 (x1, y1, x2, y2, point1_2d, point2_2d) 또는 None
         """
-        
+
         if ransac_result["homography"] is not None:
             img0 = target_image
             img1 = source_image
@@ -647,7 +648,7 @@ class Matcher:
             z3 = find_depth_from_2d_robust(
                 target_depth_origin, (point3_2d[0], point3_2d[1]), radius
             )
-            
+
             # z값만 반환
             if z1 is not None and z2 is not None and z3 is not None:
                 return z1, z2, z3
@@ -685,9 +686,7 @@ class Matcher:
             z3 = find_depth_from_2d_robust(depth_image, (u3, v3), radius)
 
             if z1 is not None and z2 is not None and z3 is not None:
-                logger.info(
-                    f"Depth 계산 완료: {z1:.1f}, {z2:.1f}, {z3:.1f}"
-                )
+                logger.info(f"Depth 계산 완료: {z1:.1f}, {z2:.1f}, {z3:.1f}")
                 return z1, z2, z3
             else:
                 logger.warning("Depth 계산에 실패했습니다.")
@@ -697,24 +696,36 @@ class Matcher:
             logger.error(f"3D 포인트 계산 중 오류 발생: {e}")
             return None
 
-    def _save_failed_matches(self, target_clipped, source_image, matches_result, 
-                           ransac_result, output_path, target_texture_path):
+    def _save_failed_matches(
+        self,
+        target_clipped,
+        source_image,
+        matches_result,
+        ransac_result,
+        output_path,
+        target_texture_path,
+    ):
         """실패한 매칭 결과를 시각화하여 저장"""
-            
+
         base_name = Path(target_texture_path).stem
         visualize_matches(
-            target_clipped, source_image,
-            matches_result["keypoints0"], matches_result["keypoints1"], matches_result["confidence"],
+            target_clipped,
+            source_image,
+            matches_result["keypoints0"],
+            matches_result["keypoints1"],
+            matches_result["confidence"],
             str(output_path / f"{base_name}_failed_matches_original.png"),
-            confidence_threshold=self.config["confidence_threshold"]
+            confidence_threshold=self.config["confidence_threshold"],
         )
         visualize_matches(
-            target_clipped, source_image,
-            ransac_result["filtered_kpts0"], ransac_result["filtered_kpts1"], ransac_result["filtered_conf"],
+            target_clipped,
+            source_image,
+            ransac_result["filtered_kpts0"],
+            ransac_result["filtered_kpts1"],
+            ransac_result["filtered_conf"],
             str(output_path / f"{base_name}_failed_matches_ransac_filtered.png"),
-            confidence_threshold=self.config["confidence_threshold"]
+            confidence_threshold=self.config["confidence_threshold"],
         )
-
 
     def _project_to_3d(self, point):
         """2D 포인트를 3D로 변환"""
@@ -725,12 +736,12 @@ class Matcher:
         fy = intrinsic[1, 1]
         cx = intrinsic[0, 2]
         cy = intrinsic[1, 2]
-        
+
         z = point[2]
         x = (point[0] - cx) * z / fx
         y = (point[1] - cy) * z / fy
         return np.array([x, y, z])
-    
+
     def _load_and_undistort_image(self, path: str) -> np.ndarray:
         """이미지 로드 및 undistortion"""
         image = read_image(path)
@@ -784,8 +795,7 @@ class Matcher:
         try:
             if self.config["image_undistortion"]:
                 target_depth = self.camera.undistort_image(target_depth)
-            
- 
+
             if target_texture is not None:
                 texture_exist = True
                 target_image = target_texture
@@ -804,44 +814,64 @@ class Matcher:
                     depth_max=self.config["depth_max"],
                 )
 
-
             matches_result = self.run_matching(target_clipped, source_image)
-            
+
             ransac_result = self.run_ransac_filtering(matches_result)
 
-            if ransac_result is None: return None, None, None, None
-
+            if ransac_result is None:
+                return None, None, None, None
 
             result_points_2d = self.calculate_anchor_points(
-                    target_image=target_image, source_image=source_image, ransac_result=ransac_result
-                )
+                target_image=target_image,
+                source_image=source_image,
+                ransac_result=ransac_result,
+            )
             if result_points_2d is None:
-                    logger.warning("2D 포인트 계산에 실패했습니다.")
-                    return None, None, None, None
-          
+                logger.warning("2D 포인트 계산에 실패했습니다.")
+                return None, None, None, None
+
             result1_2d, result2_2d, result3_2d = result_points_2d
-      # Depth 계산
+            # Depth 계산
             depth_result = self.calculate_anchor_depth(
-                    target_depth_path, target_depth, result1_2d, result2_2d, result3_2d,
-                    radius=self.config["point_radius"]
-                )
+                target_depth_path,
+                target_depth,
+                result1_2d,
+                result2_2d,
+                result3_2d,
+                radius=self.config["point_radius"],
+            )
 
             if depth_result is None:
-                    self._save_failed_matches(target_clipped, source_image, matches_result, 
-                                            ransac_result, self.output_path, target_texture_path)
-                    logger.error("Depth 계산에 실패했습니다.")
-                    return None, None, None, None
+                self._save_failed_matches(
+                    target_clipped,
+                    source_image,
+                    matches_result,
+                    ransac_result,
+                    self.output_path,
+                    target_texture_path,
+                )
+                logger.error("Depth 계산에 실패했습니다.")
+                return None, None, None, None
 
             z1, z2, z3 = depth_result
-            logger.debug(f"Depth 정보: pointL: {z1:.1f}mm, pointR: {z2:.1f}mm, pointU: {z3:.1f}mm")
+            logger.debug(
+                f"Depth 정보: pointL: {z1:.1f}mm, pointR: {z2:.1f}mm, pointU: {z3:.1f}mm"
+            )
 
-                
-            result1_3d = self._project_to_3d(np.array([result1_2d[0], result1_2d[1], z1]))
-            result2_3d = self._project_to_3d(np.array([result2_2d[0], result2_2d[1], z2]))
-            result3_3d = self._project_to_3d(np.array([result3_2d[0], result3_2d[1], z3]))
-                
-            logger.debug(f"3D 포인트: L: {result1_3d}, R: {result2_3d}, U: {result3_3d}")
-                
+            result1_3d = self._project_to_3d(
+                np.array([result1_2d[0], result1_2d[1], z1])
+            )
+            result2_3d = self._project_to_3d(
+                np.array([result2_2d[0], result2_2d[1], z2])
+            )
+            result3_3d = self._project_to_3d(
+                np.array([result3_2d[0], result3_2d[1], z3])
+            )
+
+            logger.debug(
+                f"3D 포인트: L: {result1_3d}, R: {result2_3d}, U: {result3_3d}"
+            )
+
             plane_normal = compute_plane_normal(result1_3d, result2_3d, result3_3d)
 
             logger.debug(f"Plane normal: {plane_normal}")
@@ -850,10 +880,17 @@ class Matcher:
             if self.config["debug_mode"]:
 
                 save_points_to_yaml(
-                        Path(target_depth_path), target_depth.shape[:2],
-                        result1_2d, result2_2d, result3_2d,
-                        result1_3d, result2_3d, result3_3d, plane_normal, self.output_path
-                )   
+                    Path(target_depth_path),
+                    target_depth.shape[:2],
+                    result1_2d,
+                    result2_2d,
+                    result3_2d,
+                    result1_3d,
+                    result2_3d,
+                    result3_3d,
+                    plane_normal,
+                    self.output_path,
+                )
                 logger.info("포인트 위치가 YAML 파일로 저장되었습니다.")
 
                 self.visualize_results(
@@ -862,7 +899,11 @@ class Matcher:
                     source_image=source_image,
                     plane_normal=plane_normal,
                     result3d=(result1_3d, result2_3d, result3_3d),
-                    result_image_name=self.target_texture_name if texture_exist else self.target_depth_name,
+                    result_image_name=(
+                        self.target_texture_name
+                        if texture_exist
+                        else self.target_depth_name
+                    ),
                     matches_result=matches_result,
                     ransac_result=ransac_result,
                     camera=self.camera,
@@ -889,37 +930,38 @@ class Matcher:
 
             traceback.print_exc()
             return None, None, None, None
-    
+
     def cleanup(self):
         """메모리 정리"""
         logger.debug("메모리 정리 시작...")
-        
+
         # 1. 모델 정리
-        if hasattr(self, 'model') and self.model is not None:
+        if hasattr(self, "model") and self.model is not None:
             logger.debug("모델 메모리 해제 중...")
             del self.model
             self.model = None
-        
+
         # 2. 카메라 객체 정리
-        if hasattr(self, 'camera') and self.camera is not None:
+        if hasattr(self, "camera") and self.camera is not None:
             logger.debug("카메라 객체 정리 중...")
             del self.camera
             self.camera = None
-        
+
         # 3. 설정 정리
-        if hasattr(self, 'config'):
+        if hasattr(self, "config"):
             logger.debug("설정 정리 중...")
             del self.config
             self.config = None
-        
+
         # 4. PyTorch 메모리 정리
         if torch.cuda.is_available():
             logger.debug("CUDA 캐시 정리 중...")
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
-        
+
         # 5. Python 가비지 컬렉션 강제 실행
         import gc
+
         gc.collect()
-        
+
         logger.debug("메모리 정리 완료")
