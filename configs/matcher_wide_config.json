@@ -1,5 +1,5 @@
 {
-    "source_image_path": "datasets/source7.png",
+    "source_image_path": "datasets/source_wide2.png",
     "input_dir": "datasets/autochecker_0909/",
     "output_dir": "output",
     "max_keypoints": 2500,

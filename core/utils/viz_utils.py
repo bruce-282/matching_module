@@ -75,7 +75,7 @@ def visualize_matches(
     # 결과 저장
     combined_img_bgr = cv2.cvtColor(combined_img, cv2.COLOR_RGB2BGR)
     cv2.imwrite(output_path, combined_img_bgr)
-    print(f"매칭 결과가 {output_path}에 저장되었습니다.")
+    print(f"Matching result is saved to {output_path}")
     print(f"총 {match_count}개의 매칭이 시각화되었습니다.")
 
     return combined_img_bgr
@@ -102,7 +102,7 @@ def visualize_keypoints(
 
     # 결과 저장
     cv2.imwrite(output_path, img)
-    print(f"키포인트 시각화가 {output_path}에 저장되었습니다.")
+    print(f"Key points visualization is saved to {output_path}")
     print(f"총 {len(keypoints)}개의 키포인트가 표시되었습니다.")
 
     return img

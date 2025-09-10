@@ -347,7 +347,7 @@ def save_points_to_yaml(
             indent=2,
         )
 
-    print(f"포인트 위치가 {yaml_path}에 저장되었습니다.")
+    print(f"Point information is saved to {yaml_path}")
 
 
 def wrap_images(
