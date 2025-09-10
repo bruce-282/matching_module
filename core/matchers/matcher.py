@@ -894,3 +894,11 @@ class Matcher:
 
             traceback.print_exc()
             return None, None, None, None
+    
+    def cleanup(self):
+        """메모리 정리"""
+        if hasattr(self, 'roma_model') and self.roma_model is not None:
+            del self.roma_model
+            self.roma_model = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()

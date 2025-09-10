@@ -111,7 +111,7 @@ def main():
             )
         except Exception as e:
             print(f"Error: {base_name} - {e}")
-            return
+            continue
 
         # 결과 출력
         if all(x is not None for x in [result1_3d, result2_3d, result3_3d, plane_normal]):
@@ -122,6 +122,9 @@ def main():
             print(f"   Plane Normal: {plane_normal}")
         else:
             print(f"❌ 매칭 실패 - {base_name}")
+    
+    # 메모리 정리
+    matcher.cleanup()
     print("실행 완료")
 
 if __name__ == "__main__":
