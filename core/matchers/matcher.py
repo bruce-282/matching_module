@@ -631,10 +631,7 @@ class Matcher:
         """
 
         # PLY 파일이 아닌 경우 depth map 처리
-        if not is_ply_file(target_depth_path) and target_depth_origin.dtype in [
-            np.float32,
-            np.float64,
-        ]:
+        if not is_ply_file(target_depth_path):
             # depth_image가 3차원인 경우 첫 번째 채널만 사용
             if len(target_depth_origin.shape) == 3:
                 target_depth_origin = target_depth_origin[:, :, 0]
