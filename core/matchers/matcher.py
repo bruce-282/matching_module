@@ -631,10 +631,7 @@ class Matcher:
         """
 
         # PLY 파일이 아닌 경우 depth map 처리
-        if not is_ply_file(target_depth_path) and target_depth_origin.dtype in [
-            np.float32,
-            np.float64,
-        ]:
+        if not is_ply_file(target_depth_path):
             # depth_image가 3차원인 경우 첫 번째 채널만 사용
             if len(target_depth_origin.shape) == 3:
                 target_depth_origin = target_depth_origin[:, :, 0]
@@ -773,7 +770,8 @@ class Matcher:
             Tuple[result1_3d, result2_3d, result3_3d, plane_normal]
         """
         # 경로 설정
-        target_texture_path = target_texture_path or self.config["target_texture_path"]
+        if target_texture_path is None or target_texture is None:
+            target_texture_path = target_depth_path
         target_depth_path = target_depth_path or self.config["target_depth_path"]
         output_dir = output_dir or self.config["output_dir"]
 
