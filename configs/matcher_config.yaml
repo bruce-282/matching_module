@@ -11,6 +11,7 @@ max_keypoints: 2000
 ransac_method: "CV2_USAC_MAGSAC"
 ransac_reproj_threshold: 25.0
 ransac_confidence: 0.9999
+ransac_max_iterations: 500000
 debug_mode: true
 
 # 포인트 위치 설정 (이미지 비율로 설정)

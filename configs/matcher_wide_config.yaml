@@ -13,6 +13,7 @@ max_keypoints: 2500  # 와이드 이미지이므로 더 많은 키포인트
 ransac_method: "CV2_USAC_MAGSAC"
 ransac_reproj_threshold: 20.0  # 와이드 이미지용 낮은 임계값
 ransac_confidence: 0.9999
+ransac_max_iterations: 500000
 debug_mode: true
 
 # 포인트 위치 설정 (와이드 이미지용 조정)
