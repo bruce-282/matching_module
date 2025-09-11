@@ -773,7 +773,8 @@ class Matcher:
             Tuple[result1_3d, result2_3d, result3_3d, plane_normal]
         """
         # 경로 설정
-        target_texture_path = target_texture_path or self.config["target_texture_path"]
+        if target_texture_path is None or target_texture is None:
+            target_texture_path = target_depth_path
         target_depth_path = target_depth_path or self.config["target_depth_path"]
         output_dir = output_dir or self.config["output_dir"]
 
