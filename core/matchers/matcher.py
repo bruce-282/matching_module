@@ -1121,6 +1121,7 @@ class Matcher:
             pcd1_transformed.paint_uniform_color([0, 1, 0])  # 초록색 (source transformed)
             
             # 두 point cloud 합치기
+            
             combined_pcd = pcd0 + pcd1_transformed
             
             # 저장
@@ -1130,11 +1131,19 @@ class Matcher:
             # 파일명 생성
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             pcd_filename = f"{timestamp}_combined_pcd_before_icp.ply"
+            pcd_filename_transformed = f"{timestamp}_combined_pcd_before_icp_transformed.ply"
+            pcd_filename_0 = f"{timestamp}_combined_pcd_before_icp_0.ply"
             pcd_path = output_path / pcd_filename
+            pcd_path_transformed = output_path / pcd_filename_transformed
+            pcd_path_0 = output_path / pcd_filename_0
             
             # PLY 파일로 저장
             o3d.io.write_point_cloud(str(pcd_path), combined_pcd)
             self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path}")
+            o3d.io.write_point_cloud(str(pcd_path_transformed), pcd1_transformed)
+            self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_transformed}")
+            o3d.io.write_point_cloud(str(pcd_path_0), pcd0)
+            self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_0}")
             
             # 7. GICP 정합
             gicp = o3d.pipelines.registration.TransformationEstimationPointToPoint()
