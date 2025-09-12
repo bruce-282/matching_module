@@ -5,10 +5,11 @@
 import numpy as np
 import open3d as o3d
 from pathlib import Path
-import logging
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, List
 
-logger = logging.getLogger(__name__)
+from core.utils.logger_utils import get_logger
+logger = get_logger(__name__)
+
 
 
 class PointCloudToImageConverter:

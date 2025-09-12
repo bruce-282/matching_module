@@ -21,8 +21,7 @@ from typing import Dict, List, Optional, Tuple, Any
 warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
 
 # 로거 설정
-logger = logging.getLogger(__name__)
-
+from core.utils.logger_utils import setup_logger
 
 # 프로젝트 루트를 Python 경로에 추가
 project_root = Path(__file__).parent.parent.parent
@@ -66,7 +65,7 @@ class Matcher:
             "ransac_confidence": 0.9999,
             "ransac_max_iter": 300000,
             "min_num_matches": 4,
-            "geometry_type": "Homography",
+            "geometry_type": "Homography", # Homography or Fundamental
             # 시각화 설정
             "confidence_threshold": 0.5,
             # 이미지 resize 설정
@@ -76,11 +75,7 @@ class Matcher:
             "dfactor": 8,
             # 기타 설정
             "force_resize": False,
-            "threshold": 0.1,
-            "max_features": 2000,
-            "keypoint_threshold": 0.01,
-            "enable_ransac": True,
-            # 디버그 모드
+     
             "debug_mode": False,
             # 이미지 변환 포인트 설정
             "pointL_pos": {
@@ -96,12 +91,16 @@ class Matcher:
                 "y_ratio": 0.6,
             },
             "point_radius": 25,
+            "depth_max": 2100.0,
         }
-
+        if config.get("debug_mode", False):
+            self.logger = setup_logger(__name__, logging.DEBUG)
+        else:
+            self.logger = setup_logger(__name__, logging.INFO)
         # 사용자 설정으로 기본 설정 업데이트
         if config:
             self.default_config.update(config)
-            logger.debug(f"사용자 설정: {self.default_config}")
+            self.logger.debug(f"User Parameters: {self.default_config}")
 
         self.config = self.default_config
 
@@ -113,7 +112,6 @@ class Matcher:
         self.matching_time = 0.0
 
         # 모델 초기화
-        logger.debug("Matcher 모델을 초기화하는 중...")
         init_start_time = time.time()
         conf = Roma.default_conf.copy()
         conf["max_keypoints"] = self.config["max_keypoints"]
@@ -121,7 +119,7 @@ class Matcher:
         conf["model_name"] = self.config["model_name"]
         self.model = Roma(conf)
         model_init_time = time.time() - init_start_time
-        logger.info(f"모델 초기화 완료 (소요시간: {model_init_time:.3f}초)")
+        self.logger.info(f"Model initialization completed (time: {model_init_time:.3f} seconds)")
         self.camera = None
         # Camera 객체 생성 및 이미지 undistortion
         # YAML 설정에서 카메라 파라미터 직접 읽기
@@ -130,18 +128,27 @@ class Matcher:
                 from ..utils.io_utils import create_camera_from_yaml_config
 
                 self.camera = create_camera_from_yaml_config(self.config)
-                logger.info("YAML 설정에서 카메라 생성 완료")
+                self.logger.info("Camera created from YAML configuration")
             except Exception as e:
-                logger.error(f"YAML 카메라 설정 로드 실패: {e}")
+                self.logger.error(f"YAML camera configuration load failed: {e}")
                 raise e
         else:
-            logger.error(
+            self.logger.error(
                 "YAML 설정에 camera_intrinsics 또는 camera_distortions가 없습니다."
             )
-            raise ValueError("카메라 설정 파일이 없습니다.")
+            raise ValueError("Camera configuration file not found")
 
     def scale_keypoints(self, kpts: torch.Tensor, scale: np.ndarray) -> torch.Tensor:
-        """키포인트 스케일링"""
+        """
+        Scale keypoints
+        
+        Args:
+            kpts: Keypoints to scale
+            scale: Scale factor
+
+        Returns:
+            Scaled keypoints
+        """
         if np.any(scale != 1.0):
             kpts *= kpts.new_tensor(scale)
         return kpts
@@ -155,31 +162,32 @@ class Matcher:
         dfactor: int = 8,
     ) -> Tuple[torch.Tensor, np.ndarray]:
         """
-        이미지 전처리
+        Image preprocessing
 
         Args:
             image: 입력 이미지 (NumPy 배열)
-            resize_max: 최대 크기
-            force_resize: 강제 리사이즈 크기
-            grayscale: 그레이스케일 여부
-            dfactor: 다운샘플링 팩터
+            resize_max: Maximum size
+            force_resize: Force resize size
+            grayscale: Grayscale
+            dfactor: Downsampling factor
 
         Returns:
-            전처리된 이미지 텐서와 스케일 정보
+            Preprocessed image tensor and scale information
+
         """
         image = image.astype(np.float32, copy=False)
         size = image.shape[:2][::-1]
         scale = np.array([1.0, 1.0])
-        logger.debug(f"resize_max {resize_max}")
-        logger.debug(f"force_resize {force_resize}")
+        # logger.debug(f"resize_max {resize_max}")
+        # logger.debug(f"force_resize {force_resize}")
         if resize_max:
             scale = resize_max / max(size)
-            logger.debug(f"resize_max:size {size} scale {scale}")
+            #logger.debug(f"resize_max:size {size} scale {scale}")
             if scale < 1.0:
                 size_new = tuple(int(round(x * scale)) for x in size)
                 image = resize_image(image, size_new, "cv2_area")
                 scale = np.array(size) / np.array(size_new)
-                logger.debug(f"size {size} size_new {size_new} scale {scale}")
+                self.logger.debug(f"size {size} size_new {size_new} scale {scale}")
         if force_resize:
             size = image.shape[:2][::-1]
             image = resize_image(
@@ -189,7 +197,7 @@ class Matcher:
             )
             size_new = (self.config["resize_width"], self.config["resize_height"])
             scale = np.array(size) / np.array(size_new)
-            logger.debug(f"force_resize:size {size} size_new {size_new} scale {scale}")
+            #logger.debug(f"force_resize:size {size} size_new {size_new} scale {scale}")
 
         if grayscale:
             assert image.ndim == 2, image.shape
@@ -223,13 +231,13 @@ class Matcher:
         이미지 매칭을 수행
 
         Args:
-            image0_origin: 첫 번째 이미지 (NumPy 배열)
-            image1_origin: 두 번째 이미지 (NumPy 배열)
+            image0_origin: First image (NumPy array)
+            image1_origin: Second image (NumPy array)
 
         Returns:
-            매칭 결과 딕셔너리
+            Matching result dictionary
         """
-        logger.debug("=== 매칭 시작 ===")
+        self.logger.debug("=== Matching started ===")
 
         # 전처리
         image0, scale0 = self._preprocess(
@@ -244,20 +252,20 @@ class Matcher:
         )
 
         # 원본 이미지 크기와 전처리 후 크기 출력
-        logger.debug(f"원본 이미지0 크기: {image0_origin.shape}")
-        logger.debug(f"원본 이미지1 크기: {image1_origin.shape}")
-        logger.debug(f"전처리 후 이미지0 크기: {image0.shape}")
-        logger.debug(f"전처리 후 이미지1 크기: {image1.shape}")
-        logger.debug(f"스케일0: {scale0}")
-        logger.debug(f"스케일1: {scale1}")
+        self.logger.debug(f"original image0 size: {image0_origin.shape}")
+        self.logger.debug(f"original image1 size: {image1_origin.shape}")
+        self.logger.debug(f"preprocessed image0 size: {image0.shape}")
+        self.logger.debug(f"preprocessed image1 size: {image1.shape}")
+        self.logger.debug(f"scale0: {scale0}")
+        self.logger.debug(f"scale1: {scale1}")
 
         image0 = image0.to(self.device)[None]
         image1 = image1.to(self.device)[None]
 
-        logger.debug(f"최종 입력 이미지 크기: {image0.shape}, {image1.shape}")
+
 
         # 매칭 실행
-        logger.debug("이미지 매칭을 실행하는 중...")
+
         matching_start_time = time.time()
         data = {"image0": image0, "image1": image1}
         result = self.model(data)
@@ -273,11 +281,11 @@ class Matcher:
         keypoints0 = self.scale_keypoints(result["keypoints0"] + 0.5, s0) - 0.5
         keypoints1 = self.scale_keypoints(result["keypoints1"] + 0.5, s1) - 0.5
 
-        logger.info(f"매칭 완료! (매칭 시간: {self.matching_time:.3f}초)")
-        logger.debug(f"매칭된 키포인트 수: {len(keypoints0)}")
-        logger.debug(f"평균 신뢰도: {torch.mean(confidence).item():.3f}")
-        logger.debug(f"최고 신뢰도: {torch.max(confidence).item():.3f}")
-        logger.debug(f"최저 신뢰도: {torch.min(confidence).item():.3f}")
+        self.logger.info(f"Matching completed! (matching time: {self.matching_time:.3f} seconds)")
+        self.logger.debug(f"number of matches: {len(keypoints0)}")
+        self.logger.debug(f"average confidence: {torch.mean(confidence).item():.3f}")
+        self.logger.debug(f"max confidence: {torch.max(confidence).item():.3f}")
+        self.logger.debug(f"min confidence: {torch.min(confidence).item():.3f}")
 
         return {
             "keypoints0": keypoints0.cpu().numpy(),
@@ -310,7 +318,6 @@ class Matcher:
         Returns:
             RANSAC 필터링 결과 또는 None
         """
-        logger.debug("\n=== RANSAC 필터링 시작 ===")
 
         # 설정값 가져오기
         ransac_method = ransac_method or self.config["ransac_method"]
@@ -338,30 +345,28 @@ class Matcher:
             ransac_max_iter=self.config["ransac_max_iter"],
             geometry_type=self.config["geometry_type"],
         )
+        # self.logger.debug(f"filtered_pred: {filtered_pred}")
+        # logger.debug(f"pred: {pred}")
         filter_time = time.time() - start_time
 
-        # 결과 분석
         if "mmkeypoints0_orig" in filtered_pred:
             filtered_kpts0 = filtered_pred["mmkeypoints0_orig"]
             filtered_kpts1 = filtered_pred["mmkeypoints1_orig"]
             filtered_conf = filtered_pred["mmconf"]
 
-        logger.info(f"RANSAC 필터링 완료! (소요시간: {filter_time:.3f}초)")
-        logger.debug(f"필터링 후 매칭 수: {len(filtered_kpts0)}")
-        logger.debug(
-            f"필터링 비율: {len(filtered_kpts0)/len(pred['mkeypoints0_orig'])*100:.1f}%"
+        self.logger.info(f"RANSAC filtering completed! (time: {filter_time:.3f} seconds)")
+        self.logger.debug(f"number of matches after filtering: {len(filtered_kpts0)}")
+        self.logger.debug(
+            f"filtering ratio: {len(filtered_kpts0)/len(pred['mkeypoints0_orig'])*100:.1f}%"
         )
 
         if len(filtered_conf) > 0:
-            logger.debug(f"필터링 후 평균 신뢰도: {np.mean(filtered_conf):.3f}")
-            logger.debug(f"필터링 후 최고 신뢰도: {np.max(filtered_conf):.3f}")
+            self.logger.debug(f"average confidence after filtering: {np.mean(filtered_conf):.3f}")
+            self.logger.debug(f"max confidence after filtering: {np.max(filtered_conf):.3f}")
 
-        # Homography 행렬 정보
         if "Homography" in filtered_pred["geom_info"]:
             H = filtered_pred["geom_info"]["Homography"]
             geom_info = filtered_pred["geom_info"]
-
-            logger.debug(f"Homography H:\n{H}")
 
             return {
                 "filtered_kpts0": filtered_kpts0,
@@ -375,7 +380,6 @@ class Matcher:
             F = filtered_pred["geom_info"]["Fundamental"]
             geom_info = filtered_pred["geom_info"]
 
-            logger.debug(f"Fundamental F:\n{F}")
 
             return {
                 "filtered_kpts0": filtered_kpts0,
@@ -386,7 +390,7 @@ class Matcher:
                 "filter_time": filter_time,
             }
         else:
-            logger.warning("RANSAC 필터링 실패 - 충분한 매칭이 없습니다.")
+            self.logger.warning("RANSAC filtering failed - not enough matches")
             return None
 
     def visualize_results(
@@ -411,11 +415,7 @@ class Matcher:
             ransac_result: RANSAC 필터링 결과
             output_dir: 출력 디렉토리
         """
-        logger.debug("\n=== 결과 시각화 ===")
 
-        # 1. 원본 매칭 결과 시각화 (디버그 모드에서만)
-
-        logger.debug("원본 매칭 결과 시각화...")
 
         if target_texture is not None:
             target_image = target_texture
@@ -434,7 +434,7 @@ class Matcher:
 
         # 2. RANSAC 필터링 후 결과 시각화 (디버그 모드에서만)
         if ransac_result:
-            logger.debug("RANSAC 필터링 후 결과 시각화...")
+
             visualize_matches(
                 target_image,
                 source_image,
@@ -448,9 +448,7 @@ class Matcher:
                 confidence_threshold=self.config["confidence_threshold"],
             )
 
-            # 디버그 모드에서만 이미지 변환 및 시각화
             if ransac_result["homography"] is not None:
-                logger.debug("이미지 변환 결과 생성...")
 
                 if target_image is not None and source_image is not None:
                     # 이미지 변환 및 오버레이
@@ -487,12 +485,12 @@ class Matcher:
                         str(self.output_path / f"{result_image_name}_with_normal.ply"),
                         pcd,
                     )
-                    logger.debug(
-                        f"PLY 파일 저장: {self.output_path / f'{result_image_name}_with_normal.ply'}"
+                    self.logger.debug(
+                        f"PLY file saved: {self.output_path / f'{result_image_name}_with_normal.ply'}"
                     )
 
                     if warp_result[0] is not None:
-                        # 변환된 이미지를 파일로 저장
+
                         output_file = str(
                             self.output_path
                             / f"{result_image_name}_warped_overlapped.png"
@@ -500,60 +498,52 @@ class Matcher:
                         cv2.imwrite(
                             output_file, cv2.cvtColor(warp_result[0], cv2.COLOR_RGB2BGR)
                         )
-                        logger.debug(f"변환된 이미지 저장: {output_file}")
+                        self.logger.debug(f"Transformed image saved: {output_file}")
                     else:
-                        logger.warning("이미지 변환 실패")
+                        self.logger.warning("Image transformation failed")
                 else:
-                    logger.error("이미지 로드 실패")
+                    self.logger.error("Image loading failed")
 
     def calculate_anchor_points(
         self,
-        target_image: np.ndarray,
-        source_image: np.ndarray,
-        ransac_result: Dict[str, Any],
+        source_image_shape: Optional[Tuple[int, int]] = None,
+        ransac_result: Dict[str, Any] = None,
     ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """
         RANSAC 결과를 바탕으로 포인트 위치를 계산
 
         Args:
-            image0_origin: 첫 번째 이미지 (numpy array)
-            image1_origin: 두 번째 이미지 (numpy array)
+            source_image_shape: 소스 이미지 크기
             ransac_result: RANSAC 필터링 결과
 
         Returns:
-            계산된 포인트 좌표 (x1, y1, x2, y2, point1_2d, point2_2d) 또는 None
+            계산된 포인트 좌표 (point1_2d, point2_2d, point3_2d) 또는 None
         """
 
-        if ransac_result["homography"] is not None:
-            img0 = target_image
-            img1 = source_image
+        if ransac_result is not None and "homography" in ransac_result:
+ 
 
-            if img0 is not None and source_image is not None:
+            if source_image_shape is not None:
                 # 포인트 위치 계산을 위한 간단한 변환
-                h0, w0, _ = img0.shape
-                h1, w1, _ = source_image.shape
+                h, w = source_image_shape
 
                 if "Homography" in ransac_result["geom_info"]:
                     H = np.array(ransac_result["geom_info"]["Homography"])
                     transform_matrix = np.linalg.inv(H)
                 elif "Fundamental" in ransac_result["geom_info"]:
                     F = np.array(ransac_result["geom_info"]["Fundamental"])
-                    # E = K2.T @ F @ K1
-                    H, _ = cv2.findHomography(
-                        ransac_result["filtered_kpts0"],
-                        ransac_result["filtered_kpts1"],
-                        cv2.RANSAC,
-                    )
-                    transform_matrix = np.linalg.inv(H)
+                    E = K2.T @ F @ K1
+   
+                    transform_matrix = np.linalg.inv(E)
                 else:
-                    logger.error("Homography 또는 Fundamental 행렬이 없습니다.")
+                    self.logger.error("Homography or Fundamental matrix not found in ransac_result")
 
                 # 포인트 변환 계산
                 pointL_coords = np.array(
                     [
                         [
-                            w1 * self.config["pointL_pos"]["x_ratio"],
-                            h1 * self.config["pointL_pos"]["y_ratio"],
+                            w * self.config["pointL_pos"]["x_ratio"],
+                            h * self.config["pointL_pos"]["y_ratio"],
                             1,
                         ]
                     ],
@@ -565,8 +555,8 @@ class Matcher:
                 pointR_coords = np.array(
                     [
                         [
-                            w1 * self.config["pointR_pos"]["x_ratio"],
-                            h1 * self.config["pointR_pos"]["y_ratio"],
+                            w * self.config["pointR_pos"]["x_ratio"],
+                            h * self.config["pointR_pos"]["y_ratio"],
                             1,
                         ]
                     ],
@@ -578,8 +568,8 @@ class Matcher:
                 pointU_coords = np.array(
                     [
                         [
-                            w1 * self.config["pointU_pos"]["x_ratio"],
-                            h1 * self.config["pointU_pos"]["y_ratio"],
+                            w * self.config["pointU_pos"]["x_ratio"],
+                            h * self.config["pointU_pos"]["y_ratio"],
                             1,
                         ]
                     ],
@@ -599,11 +589,11 @@ class Matcher:
 
                 return point1_2d, point2_2d, point3_2d
             else:
-                logger.error("이미지 로드 실패")
+                self.logger.error("source image shape not found in ransac_result")
                 return None
         else:
-            logger.warning(
-                "Homography 또는 Fundamental 행렬이 없어 포인트를 계산할 수 없습니다."
+            self.logger.warning(
+                "Homography or Fundamental matrix not found in ransac_result, cannot calculate points"
             )
             return None
 
@@ -654,12 +644,10 @@ class Matcher:
         try:
             import open3d as o3d
 
-            # PLY 파일 로드
-            logger.debug(f"PLY 파일에서 3D 정보를 추출하는 중: {target_depth_path}")
             pcd = o3d.io.read_point_cloud(target_depth_path)
 
             if not pcd.has_points():
-                logger.warning("PLY 파일에 포인트가 없습니다.")
+                self.logger.warning("PLY file has no points")
                 return None
 
             points = np.asarray(pcd.points)
@@ -669,7 +657,7 @@ class Matcher:
             depth_image, intrinsic = point_cloud_to_depth_map(points, colors)
 
             if depth_image is None:
-                logger.error("Depth map 생성에 실패했습니다.")
+                self.logger.error("Depth map creation failed")
                 return None
 
             # 2D 포인트를 정수 좌표로 변환
@@ -683,14 +671,14 @@ class Matcher:
             z3 = find_depth_from_2d_robust(depth_image, (u3, v3), radius)
 
             if z1 is not None and z2 is not None and z3 is not None:
-                logger.info(f"Depth 계산 완료: {z1:.1f}, {z2:.1f}, {z3:.1f}")
+                self.logger.debug(f"Depth calculation completed: {z1:.1f}, {z2:.1f}, {z3:.1f}")
                 return z1, z2, z3
             else:
-                logger.warning("Depth 계산에 실패했습니다.")
+                self.logger.error("Depth calculation failed")
                 return None
 
         except Exception as e:
-            logger.error(f"3D 포인트 계산 중 오류 발생: {e}")
+            self.logger.error(f"3D point calculation failed: {e}")
             return None
 
     def _save_failed_matches(
@@ -724,7 +712,7 @@ class Matcher:
             confidence_threshold=self.config["confidence_threshold"],
         )
 
-    def _project_to_3d(self, point):
+    def _backproject_to_3d(self, point):
         """2D 포인트를 3D로 변환"""
 
         intrinsic = self.camera.get_intrinsic_matrix()
@@ -775,14 +763,11 @@ class Matcher:
         target_depth_path = target_depth_path or self.config["target_depth_path"]
         output_dir = output_dir or self.config["output_dir"]
 
-        logger.debug("=== 매칭 + RANSAC 필터링 시작 ===")
-        logger.debug(f"Target texture: {target_texture_path}")
-        logger.debug(f"Target depth: {target_depth_path}")
-        logger.debug(f"출력 디렉토리: {output_dir}")
-        logger.debug(f"최대 키포인트: {self.config['max_keypoints']}")
-        logger.debug(f"RANSAC 재투영 임계값: {self.config['ransac_reproj_threshold']}")
-        logger.debug(f"RANSAC 신뢰도: {self.config['ransac_confidence']}")
-        logger.debug(f"디버그 모드: {self.config['debug_mode']}")
+
+        self.logger.debug(f"Target texture: {target_texture_path}")
+        self.logger.debug(f"Target depth: {target_depth_path}")
+        self.logger.debug(f"Output directory: {output_dir}")
+
 
         # for output path
         self.target_texture_name = Path(target_texture_path).stem
@@ -820,12 +805,11 @@ class Matcher:
                 return None, None, None, None
 
             result_points_2d = self.calculate_anchor_points(
-                target_image=target_image,
-                source_image=source_image,
+                source_image_shape=source_image.shape[:2],
                 ransac_result=ransac_result,
             )
             if result_points_2d is None:
-                logger.warning("2D 포인트 계산에 실패했습니다.")
+                self.logger.error("2D points calculation failed")
                 return None, None, None, None
 
             result1_2d, result2_2d, result3_2d = result_points_2d
@@ -848,31 +832,26 @@ class Matcher:
                     self.output_path,
                     target_texture_path,
                 )
-                logger.error("Depth 계산에 실패했습니다.")
+                self.logger.error("Depth 계산에 실패했습니다.")
                 return None, None, None, None
 
             z1, z2, z3 = depth_result
-            logger.debug(
-                f"Depth 정보: pointL: {z1:.1f}mm, pointR: {z2:.1f}mm, pointU: {z3:.1f}mm"
+            self.logger.debug(
+                f"Depth information: pointL: {z1:.1f}mm, pointR: {z2:.1f}mm, pointU: {z3:.1f}mm"
             )
 
-            result1_3d = self._project_to_3d(
-                np.array([result1_2d[0], result1_2d[1], z1])
-            )
-            result2_3d = self._project_to_3d(
-                np.array([result2_2d[0], result2_2d[1], z2])
-            )
-            result3_3d = self._project_to_3d(
+            result1_3d, result2_3d, result3_3d = self.calculate_3d_points(
+                np.array([result1_2d[0], result1_2d[1], z1]),   
+                np.array([result2_2d[0], result2_2d[1], z2]), 
                 np.array([result3_2d[0], result3_2d[1], z3])
             )
-
-            logger.debug(
-                f"3D 포인트: L: {result1_3d}, R: {result2_3d}, U: {result3_3d}"
+            self.logger.debug(
+                f"3D points: pointL: {result1_3d}, pointR: {result2_3d}, pointU: {result3_3d}"
             )
 
             plane_normal = compute_plane_normal(result1_3d, result2_3d, result3_3d)
 
-            logger.debug(f"Plane normal: {plane_normal}")
+            self.logger.debug(f"Plane normal: {plane_normal}")
 
             # 4. 결과 시각화
             if self.config["debug_mode"]:
@@ -889,7 +868,7 @@ class Matcher:
                     plane_normal,
                     self.output_path,
                 )
-                logger.info("포인트 위치가 YAML 파일로 저장되었습니다.")
+                self.logger.info("Points information is saved to YAML file.")
 
                 self.visualize_results(
                     target_texture=target_clipped if texture_exist else None,
@@ -912,48 +891,69 @@ class Matcher:
             if ransac_result:
                 total_time += ransac_result.get("filter_time", 0.0)
 
-            logger.info("\n=== 파이프라인 완료 ===")
-            logger.info(f"매칭 시간: {self.matching_time:.3f}초")
+            self.logger.info("\n=== Pipeline completed ===")
+            self.logger.info(f"Matching time: {self.matching_time:.3f} seconds")
             if ransac_result:
-                logger.info(
-                    f"RANSAC 필터링 시간: {ransac_result.get('filter_time', 0.0):.3f}초"
+                self.logger.info(
+                    f"RANSAC filtering time: {ransac_result.get('filter_time', 0.0):.3f} seconds"
                 )
-            logger.info(f"총 소요 시간: {total_time:.3f}초")
+            self.logger.info(f"Total time: {total_time:.3f} seconds")
 
             return result1_3d, result2_3d, result3_3d, plane_normal
 
         except Exception as e:
-            logger.error(f"오류가 발생했습니다: {e}")
+            self.logger.error(f"Error occurred: {e}")
             import traceback
 
             traceback.print_exc()
             return None, None, None, None
 
+    def calculate_3d_points(self, result1_3d: np.ndarray, result2_3d: np.ndarray, result3_3d: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        2D 좌표와 깊이 정보를 이용하여 3D 포인트를 계산합니다.
+        
+        Args:
+            result1_3d (np.ndarray): Point L의 3D 좌표 [x, y, z]
+            result2_3d (np.ndarray): Point R의 3D 좌표 [x, y, z]  
+            result3_3d (np.ndarray): Point U의 3D 좌표 [x, y, z]
+            
+        Returns:
+            tuple: (backprojected1_3d, backprojected2_3d, backprojected3_3d)
+                - backprojected1_3d: Point L의 역투영된 3D 좌표
+                - backprojected2_3d: Point R의 역투영된 3D 좌표
+                - backprojected3_3d: Point U의 역투영된 3D 좌표
+        """
+        backprojected1_3d = self._backproject_to_3d(result1_3d)
+        backprojected2_3d = self._backproject_to_3d(result2_3d)
+        backprojected3_3d = self._backproject_to_3d(result3_3d)
+
+        return backprojected1_3d, backprojected2_3d, backprojected3_3d
+
     def cleanup(self):
         """메모리 정리"""
-        logger.debug("메모리 정리 시작...")
+        self.logger.debug("Memory cleanup started...")
 
         # 1. 모델 정리
         if hasattr(self, "model") and self.model is not None:
-            logger.debug("모델 메모리 해제 중...")
+            self.logger.debug("Model memory cleanup in progress...")
             del self.model
             self.model = None
 
         # 2. 카메라 객체 정리
         if hasattr(self, "camera") and self.camera is not None:
-            logger.debug("카메라 객체 정리 중...")
+            self.logger.debug("Camera object cleanup in progress...")
             del self.camera
             self.camera = None
 
         # 3. 설정 정리
         if hasattr(self, "config"):
-            logger.debug("설정 정리 중...")
+            self.logger.debug("Configuration cleanup in progress...")
             del self.config
             self.config = None
 
         # 4. PyTorch 메모리 정리
         if torch.cuda.is_available():
-            logger.debug("CUDA 캐시 정리 중...")
+            self.logger.debug("CUDA cache cleanup in progress...")
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
 
@@ -962,4 +962,4 @@ class Matcher:
 
         gc.collect()
 
-        logger.debug("메모리 정리 완료")
+        self.logger.debug("Memory cleanup completed")

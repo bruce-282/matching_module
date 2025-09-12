@@ -9,8 +9,10 @@ from PIL import Image
 import numpy as np
 import cv2
 import os
-
 import logging
+
+from core.utils.logger_utils import get_logger
+logger = get_logger(__name__)
 
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
@@ -21,7 +23,7 @@ def process_depth_map(
     depth_max: float = 1500.0,
 ) -> np.ndarray:
     """
-    Depth map을 처리하여 8비트 이미지로 변환합니다.
+    Process depth map and convert to 8-bit image.
     depth_max보다 큰 값은 texture 값으로 대체합니다.
 
     Args:
@@ -35,7 +37,7 @@ def process_depth_map(
 
     # Depth max 값보다 큰 값은 texture 값으로 대체
     if texture_image is not None:
-
+        
         processed = texture_image.copy()
         mask = (depth_image > depth_max) | (depth_image == 0.0)
         processed[mask] = 0

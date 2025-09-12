@@ -6,16 +6,16 @@ import cv2
 import numpy as np
 from pathlib import Path
 import yaml
-import logging
+from core.utils.logger_utils import get_logger
 from typing import Dict, List, Optional, Tuple, Any
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-# # RANSAC 관련 상수들
+# # RANSAC related constants
 DEFAULT_MIN_NUM_MATCHES = 4
 
 
-# RANSAC 메서드 매핑
+# RANSAC method mapping
 ransac_zoo = {
     "CV2_RANSAC": cv2.RANSAC,
     "CV2_USAC_MAGSAC": cv2.USAC_MAGSAC,
@@ -197,6 +197,7 @@ def filter_matches(
     # do not show mask
     geom_info.pop("mask_h", None)
     geom_info.pop("mask_f", None)
+    
     pred["geom_info"] = geom_info
     return pred
 
@@ -207,7 +208,7 @@ def compute_geometry(
     ransac_reproj_threshold: float,
     ransac_confidence: float,
     ransac_max_iter: int,
-    geometry_type: str,
+    geometry_type: str = "Homography",
 ) -> Dict[str, List[float]]:
     """
     Compute geometric information of matches, including Fundamental matrix,
@@ -226,6 +227,10 @@ def compute_geometry(
     mkpts0: Optional[np.ndarray] = None
     mkpts1: Optional[np.ndarray] = None
 
+    if geometry_type not in ["Homography", "Fundamental"]:
+        logger.warning(f"지원되지 않는 geometry_type: {geometry_type}, 기본값 'Homography' 사용")
+        geometry_type = "Homography"
+
     if "mkeypoints0_orig" in pred.keys() and "mkeypoints1_orig" in pred.keys():
         mkpts0 = pred["mkeypoints0_orig"]
         mkpts1 = pred["mkeypoints1_orig"]
@@ -240,39 +245,29 @@ def compute_geometry(
             return {}
         geo_info: Dict[str, List[float]] = {}
 
+        M, mask = proc_ransac_matches(
+                mkpts0,
+                mkpts1,
+                ransac_method,
+                ransac_reproj_threshold,
+                ransac_confidence,
+                ransac_max_iter,
+                geometry_type=geometry_type,
+        )
+
+        if M is None: return {}
+
         if geometry_type == "Fundamental":
-            F, mask_f = proc_ransac_matches(
-                mkpts0,
-                mkpts1,
-                ransac_method,
-                ransac_reproj_threshold,
-                ransac_confidence,
-                ransac_max_iter,
-                geometry_type="Fundamental",
-            )
+            geo_info["Fundamental"] = M.tolist()
+            geo_info["mask_f"] = mask
 
-            if F is not None:
-                geo_info["Fundamental"] = F.tolist()
-                geo_info["mask_f"] = mask_f
+        else: 
+            geo_info["Homography"] = M.tolist()
+            geo_info["mask_h"] = mask
+        
+        
+        return geo_info
 
-                return geo_info
-
-        else:
-            H, mask_h = proc_ransac_matches(
-                mkpts0,
-                mkpts1,
-                ransac_method,
-                ransac_reproj_threshold,
-                ransac_confidence,
-                ransac_max_iter,
-                geometry_type="Homography",
-            )
-
-            if H is not None:
-                geo_info["Homography"] = H.tolist()
-                geo_info["mask_h"] = mask_h
-
-            return geo_info
     else:
         return {}
 
@@ -347,7 +342,7 @@ def save_points_to_yaml(
             indent=2,
         )
 
-    print(f"Point information is saved to {yaml_path}")
+    logger.info(f"Point information is saved to {yaml_path}")
 
 
 def wrap_images(
@@ -436,7 +431,7 @@ def wrap_images(
             )  # Normalize homogeneous coordinates
 
         else:
-            print("Error: Unknown geometry type")
+            logger.error("Unknown geometry type")
 
         # Create overlapped image by blending warped_image onto input_image0
         overlapped_image = None

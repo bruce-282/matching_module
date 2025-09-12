@@ -3,11 +3,13 @@
 
 # 이미지 경로 설정
 source_image_path: "datasets/source_wide2.png"
-input_dir: "datasets/autochecker_0909/"
-output_dir: "output"
+input_dir: "datasets/0911/"
+output_dir: "output0911"
 
 # 매칭 파라미터 (와이드 이미지용 조정)
 max_keypoints: 2500  # 와이드 이미지이므로 더 많은 키포인트
+
+#geometry_type: "Fundamental"
 ransac_method: "CV2_USAC_MAGSAC"
 ransac_reproj_threshold: 20.0  # 와이드 이미지용 낮은 임계값
 ransac_confidence: 0.9999
@@ -24,7 +26,7 @@ pointR_pos:
 
 pointU_pos:
   x_ratio: 0.485
-  y_ratio: 0.4
+  y_ratio: 0.6
 
 # 기타 설정
 point_radius: 25

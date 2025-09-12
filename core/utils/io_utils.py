@@ -7,9 +7,9 @@ import yaml
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
-import logging
+from core.utils.logger_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def load_camera_config(config_path: str) -> Dict[str, Any]:
@@ -30,56 +30,56 @@ def load_camera_config(config_path: str) -> Dict[str, Any]:
     config_path = Path(config_path)
 
     if not config_path.exists():
-        raise FileNotFoundError(f"설정 파일을 찾을 수 없습니다: {config_path}")
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
 
-        logger.info(f"카메라 설정 파일 로드 완료: {config_path}")
+        logger.info(f"Camera configuration file loaded: {config_path}")
         return config
 
     except json.JSONDecodeError as e:
-        raise json.JSONDecodeError(f"JSON 파싱 오류: {e}")
+        raise json.JSONDecodeError(f"JSON parsing error: {e}")
     except Exception as e:
-        raise Exception(f"설정 파일 로드 중 오류 발생: {e}")
+        raise Exception(f"Configuration file load error: {e}")
 
 
 def extract_camera_params(
     config: Dict[str, Any]
 ) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int]]:
     """
-    카메라 설정에서 내부 파라미터, 왜곡 계수, 이미지 크기를 추출합니다.
+    Extract camera parameters, distortion coefficients, and image size from the camera configuration.
 
     Args:
-        config: 카메라 설정 딕셔너리
+        config: Camera configuration dictionary
 
     Returns:
-        (K, dist_coeffs, image_size): 카메라 내부 파라미터, 왜곡 계수, 이미지 크기
+        (K, dist_coeffs, image_size): Camera parameters, distortion coefficients, and image size
 
     Raises:
-        KeyError: 필수 키가 없을 때
-        ValueError: 파라미터 형식이 잘못되었을 때
+        KeyError: Required key not found
+        ValueError: Parameter format is incorrect
     """
     try:
-        # sensors 섹션에서 scanner 정보 추출
+        # Extract scanner information from the sensors section
         if "sensores" not in config:
-            raise KeyError("'sensores' 키가 설정 파일에 없습니다.")
+            raise KeyError("'sensores' key not found in the configuration file.")
 
         sensors = config["sensores"]
         if "scanner" not in sensors:
-            raise KeyError("'scanner' 섹션이 설정 파일에 없습니다.")
+            raise KeyError("'scanner' section not found in the configuration file.")
 
         scanner = sensors["scanner"]
 
-        # 내부 파라미터 행렬 (3x3)
+        # Extract intrinsic matrix (3x3)
         if "intrinsic_matrix" not in scanner:
-            raise KeyError("'intrinsic_matrix'가 설정 파일에 없습니다.")
+            raise KeyError("'intrinsic_matrix' not found in the configuration file.")
 
         intrinsic_list = scanner["intrinsic_matrix"]
         if len(intrinsic_list) != 9:
-            raise ValueError(
-                f"내부 파라미터 행렬은 9개 요소여야 합니다. 현재: {len(intrinsic_list)}"
+            raise ValueError(   
+                f"Intrinsic matrix must have 9 elements. Current: {len(intrinsic_list)}"
             )
 
         K = np.array(intrinsic_list, dtype=np.float64).reshape(3, 3)
@@ -102,10 +102,10 @@ def extract_camera_params(
 
         image_size = (resolution["width"], resolution["height"])
 
-        logger.info(f"카메라 파라미터 추출 완료:")
-        logger.info(f"  이미지 크기: {image_size}")
-        logger.info(f"  내부 파라미터 행렬: {K.shape}")
-        logger.info(f"  왜곡 계수: {dist_coeffs.shape}")
+        logger.info(f"Camera parameters extracted:")
+        logger.info(f"  Image size: {image_size}")
+        logger.info(f"  Intrinsic matrix: {K.shape}")
+        logger.info(f"  Distortion coefficients: {dist_coeffs.shape}")
 
         return K, dist_coeffs, image_size
 
@@ -113,40 +113,40 @@ def extract_camera_params(
         if isinstance(e, (KeyError, ValueError)):
             raise e
         else:
-            raise Exception(f"카메라 파라미터 추출 중 오류 발생: {e}")
+            raise Exception(f"Camera parameter extraction error: {e}")
 
 
 def create_camera_from_config(config_path: str):
     """
-    설정 파일에서 Camera 객체를 생성합니다.
+    Create a Camera object from the configuration file.
 
     Args:
-        config_path: 카메라 설정 파일 경로
+        config_path: Camera configuration file path
 
     Returns:
-        Camera 객체
+        Camera object
 
     Raises:
-        FileNotFoundError: 설정 파일을 찾을 수 없을 때
-        Exception: 기타 오류
+        FileNotFoundError: Configuration file not found
+        Exception: Other errors
     """
     from .camera_utils import Camera
 
     try:
-        # 설정 파일 로드
+        # Load configuration file
         config = load_camera_config(config_path)
 
-        # 카메라 파라미터 추출
+        # Extract camera parameters
         K, dist_coeffs, image_size = extract_camera_params(config)
 
-        # Camera 객체 생성
+        # Create Camera object
         camera = Camera(K, dist_coeffs, image_size)
 
-        logger.info(f"설정 파일에서 Camera 객체 생성 완료: {config_path}")
+        logger.info(f"Camera object created from configuration file: {config_path}")
         return camera
 
     except Exception as e:
-        logger.error(f"Camera 객체 생성 실패: {e}")
+        logger.error(f"Camera object creation failed: {e}")
         raise e
 
 
@@ -169,10 +169,10 @@ def create_camera_from_yaml_config(config: Dict[str, Any]):
     try:
         # 카메라 내부 파라미터 확인
         if "camera_intrinsics" not in config:
-            raise KeyError("'camera_intrinsics' 키가 설정에 없습니다.")
+            raise KeyError("'camera_intrinsics' key not found in the configuration.")
         
         if "camera_distortions" not in config:
-            raise KeyError("'camera_distortions' 키가 설정에 없습니다.")
+            raise KeyError("'camera_distortions' key not found in the configuration.")
 
         intrinsics = config["camera_intrinsics"]
         distortions = config["camera_distortions"]
@@ -200,9 +200,9 @@ def create_camera_from_yaml_config(config: Dict[str, Any]):
         # Camera 객체 생성
         camera = Camera(intrinsic_matrix, distortion_coeffs, image_size)
 
-        logger.info("YAML 설정에서 Camera 객체 생성 완료")
+        logger.info("Camera object created from YAML configuration")
         return camera
 
     except Exception as e:
-        logger.error(f"YAML 설정에서 Camera 객체 생성 실패: {e}")
+        logger.error(f"Camera object creation failed from YAML configuration: {e}")
         raise e

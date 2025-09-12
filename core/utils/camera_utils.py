@@ -2,9 +2,9 @@ import cv2
 import numpy as np
 import open3d as o3d
 from typing import Tuple, Optional, List
-import logging
+from core.utils.logger_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class Camera:
@@ -31,7 +31,7 @@ class Camera:
         self.map1, self.map2 = cv2.initUndistortRectifyMap(
             self.K, self.dist_coeffs, None, self.K, self.image_size, cv2.CV_32FC1
         )
-        logger.debug("Undistortion 맵 계산 완료")
+        logger.debug("Undistortion map calculation completed")
 
     def undistort_image(
         self, image: np.ndarray, interpolation: int = cv2.INTER_NEAREST
@@ -50,15 +50,15 @@ class Camera:
             undistorted_image = cv2.remap(image, self.map1, self.map2, interpolation)
         else:
             undistorted_image = image
-            logger.warning("Undistortion 맵이 계산되지 않았습니다. 왜곡 보정 미적용")
+            logger.warning("Undistortion map not calculated. Undistortion correction not applied")
         return undistorted_image.astype(image.dtype)
 
     def undistort_depth_image(self, depth_image: np.ndarray) -> np.ndarray:
         """
-        Depth 이미지 undistortion (INTER_NEAREST 사용)
+        Depth image undistortion (INTER_NEAREST used)
 
         Args:
-            depth_image: 왜곡된 depth 이미지
+            depth_image: Distorted depth image
 
         Returns:
             undistorted_depth: undistorted depth 이미지

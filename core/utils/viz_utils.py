@@ -7,6 +7,10 @@ import numpy as np
 from pathlib import Path
 from typing import Tuple
 
+from core.utils.logger_utils import get_logger
+
+logger = get_logger(__name__)
+
 
 def visualize_matches(
     image0_origin: np.ndarray,
@@ -75,8 +79,8 @@ def visualize_matches(
     # 결과 저장
     combined_img_bgr = cv2.cvtColor(combined_img, cv2.COLOR_RGB2BGR)
     cv2.imwrite(output_path, combined_img_bgr)
-    print(f"Matching result is saved to {output_path}")
-    print(f"총 {match_count}개의 매칭이 시각화되었습니다.")
+    logger.info(f"Matching result is saved to {output_path}")
+    logger.info(f"Total {match_count} matches are visualized.")
 
     return combined_img_bgr
 
@@ -93,7 +97,7 @@ def visualize_keypoints(
     # 이미지 로드
     img = cv2.imread(str(image_path))
     if img is None:
-        raise ValueError(f"이미지를 로드할 수 없습니다: {image_path}")
+        raise ValueError(f"Image loading failed: {image_path}")
 
     # 키포인트 그리기
     for kp in keypoints:
@@ -102,8 +106,8 @@ def visualize_keypoints(
 
     # 결과 저장
     cv2.imwrite(output_path, img)
-    print(f"Key points visualization is saved to {output_path}")
-    print(f"총 {len(keypoints)}개의 키포인트가 표시되었습니다.")
+    logger.info(f"Key points visualization is saved to {output_path}")
+    logger.info(f"Total {len(keypoints)} key points are visualized.")
 
     return img
 
@@ -120,8 +124,8 @@ def create_matching_animation(
 ):
     """매칭 애니메이션을 생성합니다."""
     # 이 기능은 추가 라이브러리가 필요할 수 있습니다
-    print("애니메이션 기능은 향후 구현 예정입니다.")
-    print("현재는 정적 이미지로 시각화합니다.")
+    logger.info("Animation feature is not implemented yet.")
+    logger.info("Currently, static image visualization is used.")
 
     return visualize_matches(
         image0_origin,
