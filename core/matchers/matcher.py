@@ -15,6 +15,7 @@ import torchvision.transforms.functional as F
 import warnings
 import logging
 import open3d as o3d
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 
 # torchvision 경고 숨기기
@@ -799,11 +800,27 @@ class Matcher:
                     depth_image=target_depth,
                     depth_max=self.config["depth_max"],
                 )
+            
+            # TIF 파일 등 non-RGB 이미지를 RGB로 변환
+            if len(source_image.shape) == 2:  # grayscale
+                source_image_rgb = cv2.cvtColor(source_image, cv2.COLOR_GRAY2RGB)
+                self.logger.debug("Converted grayscale source image to RGB")
+            elif len(source_image.shape) == 3 and source_image.shape[2] == 1:  # single channel
+                source_image_rgb = cv2.cvtColor(source_image, cv2.COLOR_GRAY2RGB)
+                self.logger.debug("Converted single-channel source image to RGB")
+            elif len(source_image.shape) == 3 and source_image.shape[2] == 4:  # RGBA
+                source_image_rgb = cv2.cvtColor(source_image, cv2.COLOR_RGBA2RGB)
+                self.logger.debug("Converted RGBA source image to RGB")
+            else:
+                source_image_rgb = source_image  # 이미 RGB인 경우
 
-            matches = self.run_matching(target_clipped, source_image)
+            matches = self.run_matching(target_clipped, source_image_rgb)
 
             filtered_matches = self.run_ransac_filtering(matches)
 
+            if self.config["geometry_type"] == "Fundamental":
+                source_depth = source_image  # 원본 depth 이미지 사용 (RGB 변환 전)
+                filtered_matches = self.run_matching_3d(filtered_matches, target_depth, source_depth)
 
             if filtered_matches is None:
                 return None, None, None, None
@@ -830,7 +847,7 @@ class Matcher:
             if depth_result is None:
                 self._save_failed_matches(
                     target_clipped,
-                    source_image,
+                    source_image_rgb,
                     matches,
                     filtered_matches,
                     self.output_path,
@@ -877,7 +894,7 @@ class Matcher:
                 self.visualize_results(
                     target_texture=target_clipped if texture_exist else None,
                     target_depth=target_depth,
-                    source_image=source_image,
+                    source_image=source_image_rgb,
                     plane_normal=plane_normal,
                     result3d=(result1_3d, result2_3d, result3_3d),
                     result_image_name=(
@@ -928,6 +945,239 @@ class Matcher:
         backprojected3_3d = self._backproject_to_3d(result3_3d)
 
         return backprojected1_3d, backprojected2_3d, backprojected3_3d
+
+    def run_matching_3d(self, filtered_matches: Dict[str, Any], depth_target: np.ndarray, depth_source: np.ndarray) -> Optional[Dict[str, Any]]:
+        """
+        Fundamental Matrix를 이용한 3D 매칭 및 GICP 정합
+        
+        Args:
+            filtered_matches: RANSAC 필터링된 매칭 결과
+            depth_target: 타겟 이미지의 depth 이미지 (필수)
+            depth_source: 소스 이미지의 depth 이미지 (필수)
+            
+        Returns:
+            3D 매칭 결과 딕셔너리 또는 None
+        """
+        try:
+            # 1. Fundamental Matrix 추출
+            if "Fundamental" not in filtered_matches.get("geom_info", {}):
+                self.logger.error("Fundamental matrix not found in filtered matches")
+                return None
+                
+            F = np.array(filtered_matches["geom_info"]["Fundamental"])
+            self.logger.debug(f"Fundamental matrix: {F}")
+            
+            # 2. 카메라 내부 파라미터 추출
+            K = self.camera.K  # 3x3 intrinsic matrix
+            self.logger.debug(f"Intrinsic matrix: {K}")
+            
+            # 3. Essential Matrix 계산: E = K2^T * F * K1
+            # 단일 카메라이므로 K1 = K2 = K
+            E = K.T @ F @ K
+            self.logger.debug(f"Essential matrix: {E}")
+            
+            # 4. Relative Pose 추출 (R, t)
+            # OpenCV의 recoverPose 사용
+            keypoints0 = filtered_matches["filtered_kpts0"]
+            keypoints1 = filtered_matches["filtered_kpts1"]
+            
+            # 정수 좌표로 변환
+            pts0 = keypoints0.astype(np.int32)
+            pts1 = keypoints1.astype(np.int32)
+            
+            # recoverPose로 R, t 추출
+            retval, R, t, mask = cv2.recoverPose(E, pts0, pts1, K)
+            
+            if retval == 0:
+                self.logger.error("Failed to recover pose from essential matrix")
+                return None
+                
+            self.logger.info(f"Recovered pose - inliers: {retval}")
+            self.logger.debug(f"Rotation matrix:\n {R}")
+            self.logger.debug(f"Translation vector:\n {t}")
+            
+            # 5. Depth 이미지에서 3D 포인트 추출
+            if depth_target is None or depth_source is None:
+                self.logger.error("Depth images are required for 3D matching")
+                return None
+                
+            self.logger.info("Using depth images for 3D point extraction")
+            
+            # 매칭된 키포인트에서 유효한 depth 값만 추출
+            valid_indices = []
+            points_3d_0 = []
+            points_3d_1 = []
+
+            # if depth_target.dtype == np.uint8:
+            #     depth_target = depth_target.astype(np.float32)
+            # if depth_source.dtype == np.uint8:
+            #     depth_source = depth_source.astype(np.float32)
+            
+
+            valid_count = 0
+            boundary_fail_count = 0
+            zero_depth_count = 0
+            
+            for i, (pt0, pt1) in enumerate(zip(pts0, pts1)):
+                x0, y0 = int(pt0[0]), int(pt0[1])
+                x1, y1 = int(pt1[0]), int(pt1[1])
+                
+                # 이미지 경계 확인
+                if (0 <= x0 < depth_target.shape[1] and 0 <= y0 < depth_target.shape[0] and
+                    0 <= x1 < depth_source.shape[1] and 0 <= y1 < depth_source.shape[0]):
+                    
+                    # 3채널 depth 이미지에서 첫 번째 채널만 사용
+                    if len(depth_target.shape) == 3:
+                        d0 = depth_target[y0, x0, 0]  # 첫 번째 채널
+                    else:
+                        d0 = depth_target[y0, x0]
+                    
+                    if len(depth_source.shape) == 3:
+                        d1 = depth_source[y1, x1, 0]  # 첫 번째 채널
+                    else:
+                        d1 = depth_source[y1, x1]
+                    
+                    # # numpy 배열을 스칼라로 안전하게 변환
+                    # try:
+                    #     d0 = float(d0)
+                    #     d1 = float(d1)
+                    # except (ValueError, TypeError):
+                    #     continue  # 변환 실패 시 해당 포인트 건너뛰기
+                    
+                    
+                    if d0 > 0.0 and d1 > 0.0:
+                        valid_count += 1
+                        # 2D → 3D 변환
+                        z0 = d0
+                        z1 = d1
+                        
+                        x3d_0 = (x0 - K[0, 2]) * z0 / K[0, 0]
+                        y3d_0 = (y0 - K[1, 2]) * z0 / K[1, 1]
+                        
+                        x3d_1 = (x1 - K[0, 2]) * z1 / K[0, 0]
+                        y3d_1 = (y1 - K[1, 2]) * z1 / K[1, 1]
+                        
+                        points_3d_0.append([x3d_0, y3d_0, z0])
+                        points_3d_1.append([x3d_1, y3d_1, z1])
+                        valid_indices.append(i)
+                    else:
+                        zero_depth_count += 1
+                else:
+                    boundary_fail_count += 1
+            
+            # 통계 정보 로깅
+            self.logger.debug(f"Point processing stats:")
+            self.logger.debug(f"  - Total points: {len(pts0)}")
+            self.logger.debug(f"  - Valid 3D points: {valid_count}")
+            self.logger.debug(f"  - Boundary failures: {boundary_fail_count}")
+            self.logger.debug(f"  - Zero depth: {zero_depth_count}")
+            
+            if len(points_3d_0) < 4:
+                self.logger.error(f"Insufficient valid 3D points: {len(points_3d_0)}")
+                return None
+            
+            points_3d_0 = np.array(points_3d_0)
+            points_3d_1 = np.array(points_3d_1)
+            
+            self.logger.info(f"Extracted {len(points_3d_0)} valid 3D points from depth images")
+            
+            # 스케일 정규화 (두 point cloud 간의 스케일 차이 해결)
+            # Target과 Source의 depth 범위를 맞춤
+            target_depth_scale = np.percentile(points_3d_0[:, 2], 95)  # 95% percentile 사용
+            source_depth_scale = np.percentile(points_3d_1[:, 2], 95)
+            
+            if target_depth_scale > 0 and source_depth_scale > 0:
+                scale_factor = target_depth_scale / source_depth_scale
+                points_3d_1 = points_3d_1 * scale_factor
+                self.logger.info(f"Applied scale normalization: factor={scale_factor:.3f}")
+                self.logger.debug(f"Target depth scale: {target_depth_scale:.2f}, Source depth scale: {source_depth_scale:.2f}")
+            else:
+                self.logger.warning("Could not compute scale factor, using original coordinates")
+            
+            self.logger.debug(f"3D points - pcd0:\n {points_3d_0}, pcd1:\n {points_3d_1}")
+            
+            # 6. Open3D Point Cloud 생성
+            pcd0 = o3d.geometry.PointCloud()
+            pcd1 = o3d.geometry.PointCloud()
+            
+            pcd0.points = o3d.utility.Vector3dVector(points_3d_0)
+            pcd1.points = o3d.utility.Vector3dVector(points_3d_1)
+            
+            # 6.5. Relative pose로 변환한 point cloud 저장 (ICP 전)
+            # recoverPose에서 반환된 R, t는 두 번째 카메라에서 첫 번째 카메라로의 변환
+            # 따라서 첫 번째 카메라 좌표계로 변환하려면 역변환을 사용해야 함
+            R_inv = R.T  # 회전의 역변환
+            t_inv = -R.T @ t  # 이동의 역변환
+            
+            # 두 번째 이미지의 3D 포인트를 첫 번째 카메라 좌표계로 변환
+            points_3d_1_transformed = (R_inv @ points_3d_1.T + t_inv).T
+            
+            # 변환된 point cloud 생성
+            pcd1_transformed = o3d.geometry.PointCloud()
+            pcd1_transformed.points = o3d.utility.Vector3dVector(points_3d_1_transformed)
+            
+            # 색상 설정 (시각화용)
+            pcd0.paint_uniform_color([1, 0, 0])  # 빨간색 (target)
+            pcd1_transformed.paint_uniform_color([0, 1, 0])  # 초록색 (source transformed)
+            
+            # 두 point cloud 합치기
+            combined_pcd = pcd0 + pcd1_transformed
+            
+            # 저장
+            output_path = Path(self.config.get("output_dir", "output"))
+            output_path.mkdir(exist_ok=True)
+            
+            # 파일명 생성
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pcd_filename = f"{timestamp}_combined_pcd_before_icp.ply"
+            pcd_path = output_path / pcd_filename
+            
+            # PLY 파일로 저장
+            o3d.io.write_point_cloud(str(pcd_path), combined_pcd)
+            self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path}")
+            
+            # 7. GICP 정합
+            gicp = o3d.pipelines.registration.TransformationEstimationPointToPoint()
+            
+            # 초기 변환 행렬 (R, t를 4x4 변환 행렬로 변환)
+            initial_transform = np.eye(4)
+            initial_transform[:3, :3] = R
+            initial_transform[:3, 3] = t.flatten()
+            
+            # GICP 실행
+            result = o3d.pipelines.registration.registration_icp(
+                pcd0, pcd1, 
+                max_correspondence_distance=0.1,  # 임계값
+                init=initial_transform,
+                estimation_method=gicp,
+                criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
+                    relative_fitness=1e-6,
+                    relative_rmse=1e-6,
+                    max_iteration=50
+                )
+            )
+            
+            self.logger.info(f"GICP registration completed")
+            self.logger.debug(f"Fitness: {result.fitness}")
+            self.logger.debug(f"RMSE: {result.inlier_rmse}")
+            
+            # 8. 결과 반환
+            return {
+                "fundamental_matrix": F,
+                "essential_matrix": E,
+                "rotation": R,
+                "translation": t,
+                "points_3d_0": points_3d_0,
+                "points_3d_1": points_3d_1,
+                "gicp_result": result,
+                "fitness": result.fitness,
+                "rmse": result.inlier_rmse,
+                "transformation": result.transformation
+            }
+            
+        except Exception as e:
+            self.logger.error(f"3D matching failed: {e}")
+            return None
 
     def cleanup(self):
         """메모리 정리"""

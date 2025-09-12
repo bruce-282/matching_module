@@ -87,7 +87,7 @@ def main():
         # 각 쌍에 대해 별도 출력 디렉토리 생성
         output_dir = config.get("output_dir", "output")
         os.makedirs(output_dir, exist_ok=True)
-        logger.debug(f"   output_dir: {output_dir}")
+        logger.info(f"   output_dir: {output_dir}")
         
         try:
             # 이미지 미리 로드 (undistortion 제외)
@@ -97,9 +97,9 @@ def main():
             target_depth = read_image(depth_file)
             source_image = read_image(config.get("source_image_path", "datasets/source.png"))
             
-            logger.debug(f"     target_texture shape: {target_texture.shape}")
-            logger.debug(f"     target_depth shape: {target_depth.shape}")
-            logger.debug(f"     source_image shape: {source_image.shape}")
+            logger.info(f"     target_texture shape/dtype: {target_texture.shape, target_texture.dtype}")
+            logger.info(f"     target_depth shape/dtype: {target_depth.shape, target_depth.dtype}")
+            logger.info(f"     source_image shape/dtype: {source_image.shape, source_image.dtype}")
          
 
             result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(
