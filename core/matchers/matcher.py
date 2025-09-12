@@ -804,9 +804,6 @@ class Matcher:
 
             filtered_matches = self.run_ransac_filtering(matches)
 
-            if self.config["geometry_type"] == "Fundamental":
-                self.run_3d_matching(filtered_matches)
-                
 
             if filtered_matches is None:
                 return None, None, None, None
