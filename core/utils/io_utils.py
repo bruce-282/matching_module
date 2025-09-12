@@ -155,24 +155,24 @@ def create_camera_from_yaml_config(config: Dict[str, Any]):
     YAML 설정에서 Camera 객체를 생성합니다.
 
     Args:
-        config: YAML 설정 딕셔너리 (camera_intrinsics, camera_distortions 포함)
+        config: YAML 설정 딕셔너리 (camera_intrinsics, camera_distortions, image_size 포함)
 
     Returns:
         Camera 객체
 
     Raises:
-        KeyError: 필수 키가 없을 때
-        ValueError: 파라미터 형식이 잘못되었을 때
+        ValueError: 필수 키가 없거나 파라미터 형식이 잘못되었을 때
+        Exception: 예상치 못한 오류가 발생했을 때
     """
     from .camera_utils import Camera
 
     try:
         # 카메라 내부 파라미터 확인
         if "camera_intrinsics" not in config:
-            raise KeyError("'camera_intrinsics' key not found in the configuration.")
+            raise ValueError("'camera_intrinsics' key not found in the configuration.")
         
         if "camera_distortions" not in config:
-            raise KeyError("'camera_distortions' key not found in the configuration.")
+            raise ValueError("'camera_distortions' key not found in the configuration.")
 
         intrinsics = config["camera_intrinsics"]
         distortions = config["camera_distortions"]
@@ -191,18 +191,107 @@ def create_camera_from_yaml_config(config: Dict[str, Any]):
             distortions["k3"]
         ], dtype=np.float32)
 
-        # 이미지 크기 추출 (기본값 제공)
-        if "image_size" in config:
-            image_size = (config["image_size"]["width"], config["image_size"]["height"])
-        else:
-            raise KeyError("'image_size'가 설정에 없습니다.")
+        # 이미지 크기 추출
+        if "image_size" not in config:
+            raise ValueError("'image_size' key not found in the configuration.")
+        
+        image_size = (config["image_size"]["width"], config["image_size"]["height"])
 
         # Camera 객체 생성
         camera = Camera(intrinsic_matrix, distortion_coeffs, image_size)
-
-        logger.info("Camera object created from YAML configuration")
         return camera
 
-    except Exception as e:
-        logger.error(f"Camera object creation failed from YAML configuration: {e}")
+    except ValueError as e:
+        # 입력 검증 오류는 로깅 후 재발생
+        logger.error(f"Configuration validation failed: {e}")
         raise e
+    except Exception as e:
+        # 예상치 못한 오류는 로깅 후 재발생
+        logger.error(f"Unexpected error during camera creation: {e}")
+        raise e
+
+
+def save_points_to_yaml(
+    image_path: Path,
+    image_size: Tuple[int, int],
+    point1_2d: Optional[np.ndarray],
+    point2_2d: Optional[np.ndarray],
+    point3_2d: Optional[np.ndarray],
+    point1_3d: Optional[np.ndarray] = None,
+    point2_3d: Optional[np.ndarray] = None,
+    point3_3d: Optional[np.ndarray] = None,
+    plane_normal: Optional[np.ndarray] = None,
+    output_path: Optional[Path] = None,
+) -> None:
+    """
+    포인트 위치를 YAML 파일로 저장합니다.
+    
+    Args:
+        image_path: 소스 이미지 경로
+        image_size: 이미지 크기 (height, width)
+        point1_2d: Point L의 2D 좌표
+        point2_2d: Point R의 2D 좌표
+        point3_2d: Point U의 2D 좌표
+        point1_3d: Point L의 3D 좌표 (선택사항)
+        point2_3d: Point R의 3D 좌표 (선택사항)
+        point3_3d: Point U의 3D 좌표 (선택사항)
+        plane_normal: 평면 법선 벡터 (선택사항)
+        output_path: 출력 디렉토리 경로 (선택사항)
+    """
+    # source 이미지 이름으로 yaml 파일 생성
+    yaml_filename = f"{image_path.stem}_result.yaml"
+
+    if output_path is not None:
+        yaml_path = output_path / yaml_filename
+    else:
+        yaml_path = image_path.parent / yaml_filename
+
+    # YAML 데이터 구조
+    points_data = {
+        "source_image": image_path.name,
+        "image_size": {
+            "width": int(image_size[1]),
+            "height": int(image_size[0]),
+        },
+        "transformed_points_2d": {
+            "pointL": {"x": int(point1_2d[0]), "y": int(point1_2d[1])},
+            "pointR": {"x": int(point2_2d[0]), "y": int(point2_2d[1])},
+            "pointU": {"x": int(point3_2d[0]), "y": int(point3_2d[1])},
+        },
+    }
+
+    # 3D 정보가 있는 경우 추가
+    if point1_3d is not None and point2_3d is not None:
+        points_data["transformed_points_3d"] = {
+            "pointL": {
+                "x": float(point1_3d[0] if point1_3d is not None else 0),
+                "y": float(point1_3d[1] if point1_3d is not None else 0),
+                "z": float(point1_3d[2] if point1_3d is not None else 0),
+            },
+            "pointR": {
+                "x": float(point2_3d[0] if point2_3d is not None else 0),
+                "y": float(point2_3d[1] if point2_3d is not None else 0),
+                "z": float(point2_3d[2]),
+            },
+            "pointU": {
+                "x": float(point3_3d[0] if point3_3d is not None else 0),
+                "y": float(point3_3d[1] if point3_3d is not None else 0),
+                "z": float(point3_3d[2] if point3_3d is not None else 0),
+            },
+            "plane_normal": {
+                "x": float(plane_normal[0] if plane_normal is not None else 0),
+                "y": float(plane_normal[1] if plane_normal is not None else 0),
+                "z": float(plane_normal[2] if plane_normal is not None else 0),
+            },
+        }
+
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        yaml.dump(
+            points_data,
+            f,
+            default_flow_style=False,
+            allow_unicode=True,
+            indent=2,
+        )
+
+    logger.info(f"Point information is saved to {yaml_path}")

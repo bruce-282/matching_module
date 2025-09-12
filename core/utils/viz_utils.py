@@ -5,7 +5,7 @@
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional, Dict, List
 
 from core.utils.logger_utils import get_logger
 
@@ -112,27 +112,87 @@ def visualize_keypoints(
     return img
 
 
-def create_matching_animation(
-    image0_origin: np.ndarray,
-    image1_origin: np.ndarray,
-    keypoints0,
-    keypoints1,
-    confidence,
-    output_path: Path,
-    confidence_threshold: float = 0.5,
-    fps: int = 10,
-):
-    """매칭 애니메이션을 생성합니다."""
-    # 이 기능은 추가 라이브러리가 필요할 수 있습니다
-    logger.info("Animation feature is not implemented yet.")
-    logger.info("Currently, static image visualization is used.")
+def warp_images(
+    img0: np.ndarray,
+    img1: np.ndarray,
+    homography: np.ndarray,
+    pointL_pos: Dict[str, float],
+    pointR_pos: Dict[str, float],
+    pointU_pos: Dict[str, float],
+    point_radius: int = 10,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """
+    Warps images using homography transformation and creates overlapped visualization.
 
-    return visualize_matches(
-        image0_origin,
-        image1_origin,
-        keypoints0,
-        keypoints1,
-        confidence,
-        output_path,
-        confidence_threshold,
+    Args:
+        img0: numpy array representing the first image (target).
+        img1: numpy array representing the second image (source).
+        homography: 3x3 homography matrix for transformation.
+        pointL_pos: Point L position configuration
+        pointR_pos: Point R position configuration
+        pointU_pos: Point U position configuration
+        point_radius: radius for drawing points
+
+    Returns:
+        A tuple containing (overlapped_image, warped_image).
+    """
+    h0, w0, _ = img0.shape
+    h1, w1, _ = img1.shape
+    
+    # Homography inverse transformation
+    H_inv = np.linalg.inv(homography)
+    warped_image = cv2.warpPerspective(img1, H_inv, (w0, h0))
+
+    # Transform 2D points using homography
+    point1_coords = np.array(
+        [[w1 * pointL_pos["x_ratio"], h1 * pointL_pos["y_ratio"], 1]],
+        dtype=np.float32,
     )
+    transformed_point1 = H_inv @ point1_coords.T
+    transformed_point1 = transformed_point1 / transformed_point1[2]  # Normalize
+
+    point2_coords = np.array(
+        [[w1 * pointR_pos["x_ratio"], h1 * pointR_pos["y_ratio"], 1]],
+        dtype=np.float32,
+    )
+    transformed_point2 = H_inv @ point2_coords.T
+    transformed_point2 = transformed_point2 / transformed_point2[2]  # Normalize
+
+    point3_coords = np.array(
+        [[w1 * pointU_pos["x_ratio"], h1 * pointU_pos["y_ratio"], 1]],
+        dtype=np.float32,
+    )
+    transformed_point3 = H_inv @ point3_coords.T
+    transformed_point3 = transformed_point3 / transformed_point3[2]  # Normalize
+
+    # Create overlapped image by blending warped image onto target image
+    warped_gray = cv2.cvtColor(warped_image, cv2.COLOR_RGB2GRAY)
+    mask = warped_gray > 0
+
+    overlapped_image = img0.copy().astype(np.float32)
+    warped_float = warped_image.astype(np.float32)
+
+    # Alpha blending: 0.7 for original, 0.3 for warped
+    alpha = 0.7
+    overlapped_image[mask] = (
+        alpha * overlapped_image[mask] + (1 - alpha) * warped_float[mask]
+    )
+
+    # Draw red circles for the transformed points
+    points = [
+        (int(transformed_point1[0][0]), int(transformed_point1[1][0])),
+        (int(transformed_point2[0][0]), int(transformed_point2[1][0])),
+        (int(transformed_point3[0][0]), int(transformed_point3[1][0])),
+    ]
+
+    for x, y in points:
+        if 0 <= x < overlapped_image.shape[1] and 0 <= y < overlapped_image.shape[0]:
+            cv2.circle(overlapped_image, (x, y), point_radius, (255, 0, 0), -1)
+
+    # Add red tint to overlapping areas for better visibility
+    red_overlay = np.zeros_like(overlapped_image)
+    red_overlay[mask] = [50, 0, 0]  # Red tint
+    overlapped_image = np.clip(overlapped_image + red_overlay, 0, 255)
+    overlapped_image = overlapped_image.astype(np.uint8)
+
+    return overlapped_image, warped_image

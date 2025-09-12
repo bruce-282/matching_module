@@ -28,12 +28,12 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from .models.roma import Roma
-from ..utils.image_utils import resize_image, read_image, process_depth_map
-from ..utils.viz_utils import visualize_matches
-from ..utils.processing_utils import filter_matches, wrap_images, save_points_to_yaml
+from ..utils.image_utils import resize_image, process_depth_map
+from ..utils.viz_utils import visualize_matches, warp_images
+from ..utils.processing_utils import filter_matches
+from ..utils.io_utils import save_points_to_yaml
 from ..utils.pcd_utils import create_point_cloud_from_depth_image
-from ..utils.camera_utils import create_default_camera, Camera
-
+from ..utils.camera_utils import Camera
 from ..utils.pcd_utils import is_ply_file
 from ..utils.depth_utils import (
     point_cloud_to_depth_map,
@@ -118,6 +118,7 @@ class Matcher:
         conf["match_threshold"] = self.config["match_threshold"]
         conf["model_name"] = self.config["model_name"]
         self.model = Roma(conf)
+
         model_init_time = time.time() - init_start_time
         self.logger.info(f"Model initialization completed (time: {model_init_time:.3f} seconds)")
         self.camera = None
@@ -187,7 +188,6 @@ class Matcher:
                 size_new = tuple(int(round(x * scale)) for x in size)
                 image = resize_image(image, size_new, "cv2_area")
                 scale = np.array(size) / np.array(size_new)
-                self.logger.debug(f"size {size} size_new {size_new} scale {scale}")
         if force_resize:
             size = image.shape[:2][::-1]
             image = resize_image(
@@ -277,15 +277,21 @@ class Matcher:
 
         confidence = result["mconf"]
 
-        # 키포인트 스케일링
-        keypoints0 = self.scale_keypoints(result["keypoints0"] + 0.5, s0) - 0.5
-        keypoints1 = self.scale_keypoints(result["keypoints1"] + 0.5, s1) - 0.5
+        # 키포인트 스케일링 (효율성 개선: 중복 연산 제거)
+        kpts0_shifted = result["keypoints0"] + 0.5
+        kpts1_shifted = result["keypoints1"] + 0.5
+        keypoints0 = self.scale_keypoints(kpts0_shifted, s0) - 0.5
+        keypoints1 = self.scale_keypoints(kpts1_shifted, s1) - 0.5
 
         self.logger.info(f"Matching completed! (matching time: {self.matching_time:.3f} seconds)")
-        self.logger.debug(f"number of matches: {len(keypoints0)}")
-        self.logger.debug(f"average confidence: {torch.mean(confidence).item():.3f}")
-        self.logger.debug(f"max confidence: {torch.max(confidence).item():.3f}")
-        self.logger.debug(f"min confidence: {torch.min(confidence).item():.3f}")
+        
+        # 디버그 모드일 때만 상세 통계 계산 (효율성 개선)
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug(f"number of matches: {len(keypoints0)}")
+            # GPU에서 한 번에 통계 계산 후 CPU로 전송
+            conf_stats = torch.stack([torch.mean(confidence), torch.max(confidence), torch.min(confidence)])
+            conf_stats_cpu = conf_stats.cpu().numpy()
+            self.logger.debug(f"confidence stats - avg: {conf_stats_cpu[0]:.3f}, max: {conf_stats_cpu[1]:.3f}, min: {conf_stats_cpu[2]:.3f}")
 
         return {
             "keypoints0": keypoints0.cpu().numpy(),
@@ -316,7 +322,7 @@ class Matcher:
             ransac_confidence: RANSAC 신뢰도
 
         Returns:
-            RANSAC 필터링 결과 또는 None
+            RANSAC 필터링 결과 및 geometry info 또는 None
         """
 
         # 설정값 가져오기
@@ -355,14 +361,19 @@ class Matcher:
             filtered_conf = filtered_pred["mmconf"]
 
         self.logger.info(f"RANSAC filtering completed! (time: {filter_time:.3f} seconds)")
-        self.logger.debug(f"number of matches after filtering: {len(filtered_kpts0)}")
-        self.logger.debug(
-            f"filtering ratio: {len(filtered_kpts0)/len(pred['mkeypoints0_orig'])*100:.1f}%"
-        )
+        
+        # 디버그 모드일 때만 상세 통계 계산 (효율성 개선)
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug(f"number of matches after filtering: {len(filtered_kpts0)}")
+            # 중복 계산 방지
+            original_count = len(pred['mkeypoints0_orig'])
+            filtered_count = len(filtered_kpts0)
+            filtered_ratio = (original_count - filtered_count) / original_count * 100
+            self.logger.debug(f"matches filtered out: {filtered_ratio:.1f}% ({original_count - filtered_count}/{original_count})")
 
-        if len(filtered_conf) > 0:
-            self.logger.debug(f"average confidence after filtering: {np.mean(filtered_conf):.3f}")
-            self.logger.debug(f"max confidence after filtering: {np.max(filtered_conf):.3f}")
+            if len(filtered_conf) > 0:
+                self.logger.debug(f"average confidence after filtering: {np.mean(filtered_conf):.3f}")
+                self.logger.debug(f"max confidence after filtering: {np.max(filtered_conf):.3f}")
 
         if "Homography" in filtered_pred["geom_info"]:
             H = filtered_pred["geom_info"]["Homography"]
@@ -452,11 +463,10 @@ class Matcher:
 
                 if target_image is not None and source_image is not None:
                     # 이미지 변환 및 오버레이
-                    warp_result = wrap_images(
+                    warp_result = warp_images(
                         target_image,
                         source_image,
-                        ransac_result["geom_info"],
-                        "Homography",
+                        ransac_result["homography"],
                         pointL_pos=self.config["pointL_pos"],
                         pointR_pos=self.config["pointR_pos"],
                         pointU_pos=self.config["pointU_pos"],
@@ -727,13 +737,6 @@ class Matcher:
         y = (point[1] - cy) * z / fy
         return np.array([x, y, z])
 
-    def _load_and_undistort_image(self, path: str) -> np.ndarray:
-        """이미지 로드 및 undistortion"""
-        image = read_image(path)
-        if self.config["image_undistortion"]:
-            image = self.camera.undistort_image(image)
-        return image
-
     def run_pipeline(
         self,
         target_texture: Optional[np.ndarray] = None,
@@ -797,16 +800,20 @@ class Matcher:
                     depth_max=self.config["depth_max"],
                 )
 
-            matches_result = self.run_matching(target_clipped, source_image)
+            matches = self.run_matching(target_clipped, source_image)
 
-            ransac_result = self.run_ransac_filtering(matches_result)
+            filtered_matches = self.run_ransac_filtering(matches)
 
-            if ransac_result is None:
+            if self.config["geometry_type"] == "Fundamental":
+                self.run_3d_matching(filtered_matches)
+                
+
+            if filtered_matches is None:
                 return None, None, None, None
 
             result_points_2d = self.calculate_anchor_points(
                 source_image_shape=source_image.shape[:2],
-                ransac_result=ransac_result,
+                ransac_result=filtered_matches,
             )
             if result_points_2d is None:
                 self.logger.error("2D points calculation failed")
@@ -827,8 +834,8 @@ class Matcher:
                 self._save_failed_matches(
                     target_clipped,
                     source_image,
-                    matches_result,
-                    ransac_result,
+                    matches,
+                    filtered_matches,
                     self.output_path,
                     target_texture_path,
                 )
@@ -881,23 +888,19 @@ class Matcher:
                         if texture_exist
                         else self.target_depth_name
                     ),
-                    matches_result=matches_result,
-                    ransac_result=ransac_result,
+                    matches_result=matches,
+                    ransac_result=filtered_matches,
                     camera=self.camera,
                 )
 
             # 전체 시간 요약
             total_time = self.matching_time
-            if ransac_result:
-                total_time += ransac_result.get("filter_time", 0.0)
+            if filtered_matches:
+                total_time += filtered_matches.get("filter_time", 0.0)
 
             self.logger.info("\n=== Pipeline completed ===")
-            self.logger.info(f"Matching time: {self.matching_time:.3f} seconds")
-            if ransac_result:
-                self.logger.info(
-                    f"RANSAC filtering time: {ransac_result.get('filter_time', 0.0):.3f} seconds"
-                )
-            self.logger.info(f"Total time: {total_time:.3f} seconds")
+
+            self.logger.info(f"Total matching time: {total_time:.3f} seconds")
 
             return result1_3d, result2_3d, result3_3d, plane_normal
 
@@ -910,7 +913,7 @@ class Matcher:
 
     def calculate_3d_points(self, result1_3d: np.ndarray, result2_3d: np.ndarray, result3_3d: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        2D 좌표와 깊이 정보를 이용하여 3D 포인트를 계산합니다.
+        2D 좌표와 깊이 정보를 이용하여 3D 포인트를 계산합니다.  
         
         Args:
             result1_3d (np.ndarray): Point L의 3D 좌표 [x, y, z]

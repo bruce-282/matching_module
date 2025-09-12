@@ -71,7 +71,7 @@ class Roma(BaseModel):
                     Path(__file__).stem, self.conf["model_utils_name"]
                 ),
             )
-        logger.info("Loading Roma model")
+        logger.debug("Loading Roma model")
         # load the model
         weights = torch.load(model_path, map_location="cpu")
         dinov2_weights = torch.load(dinov2_weights, map_location="cpu")
@@ -89,7 +89,7 @@ class Roma(BaseModel):
             amp_dtype=amp_dtype,
         )
         self.net.upsample_res = self.conf["upsample_res"]
-        logger.info("Load Roma model done.")
+        logger.debug("Load Roma model done.")
 
     def _forward(self, data):
         img0 = data["image0"].cpu().numpy().squeeze() * 255

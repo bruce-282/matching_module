@@ -75,10 +75,8 @@ def main():
         base_name = os.path.basename(depth_file).replace("_depth.tif", "")
         texture_file = os.path.join(input_dir, f"{base_name}_texture.png")
 
-        logger.info(f"  Depth file: {depth_file}")
-        logger.info(f"  Base name: {base_name}")
-        logger.info(f"  Texture file: {texture_file}")
-        logger.info(f"  Texture file exists: {os.path.exists(texture_file)}")
+        logger.info(f"Depth file: {depth_file}")
+        logger.info(f"Texture file: {texture_file}")
 
         # Check if texture file exists
         if not os.path.exists(texture_file):
@@ -93,15 +91,15 @@ def main():
         
         try:
             # 이미지 미리 로드 (undistortion 제외)
-            logger.info(f"  Loading images...")
+            logger.info(f"Loading images...")
             from core.utils.image_utils import read_image
             target_texture = read_image(texture_file)
             target_depth = read_image(depth_file)
             source_image = read_image(config.get("source_image_path", "datasets/source.png"))
             
-            logger.debug(f"   target_texture: {target_texture.shape}")
-            logger.debug(f"   target_depth: {target_depth.shape}")
-            logger.debug(f"   source_image: {source_image.shape}")
+            logger.debug(f"     target_texture shape: {target_texture.shape}")
+            logger.debug(f"     target_depth shape: {target_depth.shape}")
+            logger.debug(f"     source_image shape: {source_image.shape}")
          
 
             result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(
@@ -118,13 +116,9 @@ def main():
 
         # 결과 출력
         if all(x is not None for x in [result1_3d, result2_3d, result3_3d, plane_normal]):
-            logger.info(f"   Matching success - {base_name}")
-            logger.info(f"   Point L: {result1_3d}")
-            logger.info(f"   Point R: {result2_3d}")
-            logger.info(f"   Point U: {result3_3d}")
-            logger.info(f"   Plane Normal: {plane_normal}")
+            logger.info(f"Matching success - {base_name} \n Point L: {result1_3d} \n Point R: {result2_3d} \n Point U: {result3_3d} \n Plane Normal: {plane_normal}")
         else:
-            logger.error(f"❌ 매칭 실패 - {base_name}")
+            logger.error(f"❌ Matching failed - {base_name}")
     
     # 메모리 정리
     matcher.cleanup()
