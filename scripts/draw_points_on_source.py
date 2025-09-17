@@ -10,6 +10,12 @@ import cv2
 import numpy as np
 from pathlib import Path
 
+# 프로젝트 루트를 sys.path에 추가
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from core.utils.image_utils import read_image
+
 def main():
     """메인 함수"""
     parser = argparse.ArgumentParser(description="이미지에 포인트 그리기")
@@ -47,7 +53,7 @@ def main():
 
     # 이미지 로드
     try:
-        img = cv2.imread(source_image_path)
+        img = read_image(source_image_path)
         if img is None:
             print(f"오류: 이미지를 로드할 수 없습니다: {source_image_path}")
             return

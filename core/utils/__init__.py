@@ -9,6 +9,8 @@ from .processing_utils import (
     compute_geometry,
     proc_ransac_matches,
     set_null_pred,
+    registration_ransac_based_on_correspondence,
+    solve_rigid_transform_between_points,
 )
 from .pcd_utils import (
     load_ply_as_image,
@@ -48,6 +50,8 @@ __all__ = [
     "get_pixels_in_radius",
     "depth_estimation_mad",
     "depth_estimation_histogram",
+    "registration_ransac_based_on_correspondence",
+    "solve_rigid_transform_between_points",
 ]
 
 MODEL_REPO_ID = "Realcat/imcui_checkpoints"

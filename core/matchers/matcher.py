@@ -378,7 +378,7 @@ class Matcher:
             filtered_ratio = (original_count - filtered_count) / original_count * 100
             self.logger.debug(f"matches filtered out: {filtered_ratio:.1f}% ({original_count - filtered_count}/{original_count})")
 
-            if len(filtered_conf) > 0:
+        if len(filtered_conf) > 0:
                 self.logger.debug(f"average confidence after filtering: {np.mean(filtered_conf):.3f}")
                 self.logger.debug(f"max confidence after filtering: {np.max(filtered_conf):.3f}")
 
@@ -808,7 +808,7 @@ class Matcher:
                 )
             
             time_start = time.time()
-            if self.config["geometry_type"] == "Fundamental":
+            if 1: #self.config["geometry_type"] == "Fundamental":
                 source_depth = source_image  # 원본 depth 이미지 사용 (RGB 변환 전)
                 filtered_matches = self.run_matching_3d(filtered_matches, target_depth, source_depth)
             time_end = time.time()
@@ -1073,12 +1073,38 @@ class Matcher:
             elif self.config["pose_estimation_method"] == "svd":
                 # Open3D PointCloud에서 numpy array로 변환
                 points_source_np = np.asarray(pcd_source.points)
-                points_target_np = np.asarray(pcd_target.points)
-                
-                # Point cloud 통계 정보
-
+                points_target_np = np.asarray(pcd_target.points)   
                 
                 pose = solve_rigid_transform_between_points(points_source_np, points_target_np)
+                
+            elif self.config["pose_estimation_method"] == "teaserpp":
+                # TEASER++ registration
+                try:
+                    from core.matchers.models.teaserpp import Teaserpp
+                    
+                    # TEASER++ 모델 초기화
+                    teaserpp_conf = {
+                        "noise_bound": self.config.get("teaserpp_noise_bound", 0.1)
+                    }
+                    teaserpp_model = Teaserpp(teaserpp_conf)
+                    
+                    # Point cloud를 numpy array로 변환
+                    points_source_np = np.asarray(pcd_source.points)
+                    points_target_np = np.asarray(pcd_target.points)
+                    
+                    self.logger.info(f"TEASER++ Registration - Source: {len(points_source_np)}, Target: {len(points_target_np)}")
+                    
+                    # TEASER++ 실행
+                    result = teaserpp_model.register(points_source_np, points_target_np)
+                    
+                    if result['success']:
+                        pose = result['transformation']
+                        self.logger.info(f"TEASER++ registration successful - Inliers: {result['num_inliers']}")
+                
+                        
+                except Exception as e:
+                    self.logger.error(f"TEASER++ registration error: {e}")
+
             else:
                 raise ValueError(f"Invalid method: {self.config['pose_estimation_method']}")
 
@@ -1199,8 +1225,6 @@ class Matcher:
             # pcd_path_transformed = output_path / pcd_filename_transformed
             # o3d.io.write_point_cloud(str(pcd_path_transformed), pcd_source_transformed2)
             # self.logger.info(f"Combined point cloud (after ICP) saved: {pcd_path_transformed}")
-
-
         
             
             # 8. 결과 반환
@@ -1210,7 +1234,7 @@ class Matcher:
                 "points_3d_target": points_3d_target,
                 #"points_3d_source": points_3d_source,
                 #"gicp_result": result,
-                "fitness": result.fitness,
+                #"fitness": result.fitness,
                 "rmse": result.inlier_rmse,
                 "transformation": result.transformation
             }
