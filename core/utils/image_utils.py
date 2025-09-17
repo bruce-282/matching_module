@@ -75,14 +75,21 @@ def read_image(
     try:
         # TIFF 파일 처리 (32비트 depth map 지원)
         if path.suffix.lower() in [".tif", ".tiff"]:
-            pil_image = Image.open(str(path))
-            image = np.array(pil_image)
-
+            # tifffile을 사용하여 원본 데이터 타입과 값 보존
+            import tifffile
+            image = tifffile.imread(str(path))
+            
+            # float32로 변환하여 원본 값 보존
+            image = image.astype(np.float32)
+            
             # 단일 채널인 경우 3채널로 확장
             if len(image.shape) == 2:
                 image = np.stack([image] * 3, axis=-1)
             elif len(image.shape) == 3 and image.shape[2] == 1:
                 image = np.concatenate([image] * 3, axis=-1)
+            
+            logger.debug(f"TIFF - tifffile.imread: shape={image.shape}, dtype={image.dtype}")
+            logger.debug(f"TIFF - min={np.min(image)}, max={np.max(image)}")
 
         # 일반 이미지 파일 처리
         else:

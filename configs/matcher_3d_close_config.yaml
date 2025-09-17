@@ -2,17 +2,17 @@
 # 와이드 이미지용 특화 설정
 
 # 이미지 경로 설정
-source_image_path: "datasets/3_IMG_DepthMap_undistorted.tif"
+source_image_path: "datasets/6_IMG_DepthMap_undistorted_clipped.tif"
 input_dir: "datasets/0910/"
 output_dir: "output0910"
 
 # 매칭 파라미터 (와이드 이미지용 조정)
-max_keypoints: 10000  # 와이드 이미지이므로 더 많은 키포인트
+max_keypoints: 4000  # 와이드 이미지이므로 더 많은 키포인트
 
 geometry_type: "Fundamental"
 ransac_method: "CV2_USAC_MAGSAC"
-ransac_reproj_threshold: 8.0  # 와이드 이미지용 낮은 임계값
-#ransac_max_iter: 300000
+ransac_reproj_threshold: 12.0  # 와이드 이미지용 낮은 임계값
+ransac_max_iter: 10000
 ransac_confidence: 0.9999
 debug_mode: true
 
@@ -33,15 +33,15 @@ pointU_pos:
 point_radius: 25
 depth_max: 2500.0
 
-# 3D 매칭 설정
+
 pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
 
 # 3D RANSAC 파라미터
 ransac_3d:
-  max_correspondence_distance: 0.1   
-  ransac_n: 7                         
-  max_iterations: 5000               
-  confidence: 0.9999                  
+  max_correspondence_distance: 0.05  
+  ransac_n: 5                         
+  max_iterations: 3000                
+  confidence: 0.95                  
 
 camera_intrinsics:
   fx: 2344.06988494

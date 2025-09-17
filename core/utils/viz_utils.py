@@ -60,7 +60,6 @@ def visualize_matches(
     # 이미지 연결
     combined_img = np.hstack([img0_rgb, img1_rgb])
 
-    # 키포인트 그리기 (스케일링 적용)
     match_count = 0
     for i, (kp0, kp1, conf) in enumerate(zip(keypoints0, keypoints1, confidence)):
         if conf > confidence_threshold:

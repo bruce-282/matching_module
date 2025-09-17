@@ -15,7 +15,7 @@ import torchvision.transforms.functional as F
 import warnings
 import logging
 import open3d as o3d
-from datetime import datetime
+import copy
 from typing import Dict, List, Optional, Tuple, Any
 
 # torchvision 경고 숨기기
@@ -31,7 +31,7 @@ sys.path.insert(0, str(project_root))
 from .models.roma import Roma
 from ..utils.image_utils import resize_image, process_depth_map
 from ..utils.viz_utils import visualize_matches, warp_images
-from ..utils.processing_utils import filter_matches
+from ..utils.processing_utils import filter_matches, registration_ransac_based_on_correspondence, solve_rigid_transform_between_points
 from ..utils.io_utils import save_points_to_yaml
 from ..utils.pcd_utils import create_point_cloud_from_depth_image
 from ..utils.camera_utils import Camera
@@ -40,6 +40,7 @@ from ..utils.depth_utils import (
     point_cloud_to_depth_map,
     find_depth_from_2d_robust,
 )
+
 
 
 class Matcher:
@@ -93,6 +94,9 @@ class Matcher:
             },
             "point_radius": 25,
             "depth_max": 2100.0,
+
+            # 3D 매칭 설정
+            "pose_estimation_method": "ransac",
         }
         if config.get("debug_mode", False):
             self.logger = setup_logger(__name__, logging.DEBUG)
@@ -225,8 +229,8 @@ class Matcher:
 
     def run_matching(
         self,
-        image0_origin: np.ndarray,
-        image1_origin: np.ndarray,
+        target_image: np.ndarray,
+        source_image: np.ndarray,
     ) -> Dict[str, Any]:
         """
         이미지 매칭을 수행
@@ -242,19 +246,19 @@ class Matcher:
 
         # 전처리
         image0, scale0 = self._preprocess(
-            image0_origin,
+            target_image,
             resize_max=self.config["resize_max"],
             force_resize=self.config["force_resize"],
         )
         image1, scale1 = self._preprocess(
-            image1_origin,
+            source_image,
             resize_max=self.config["resize_max"],
             force_resize=self.config["force_resize"],
         )
 
         # 원본 이미지 크기와 전처리 후 크기 출력
-        self.logger.debug(f"original image0 size: {image0_origin.shape}")
-        self.logger.debug(f"original image1 size: {image1_origin.shape}")
+        self.logger.debug(f"original image0 size: {target_image.shape}")
+        self.logger.debug(f"original image1 size: {source_image.shape}")
         self.logger.debug(f"preprocessed image0 size: {image0.shape}")
         self.logger.debug(f"preprocessed image1 size: {image1.shape}")
         self.logger.debug(f"scale0: {scale0}")
@@ -266,33 +270,35 @@ class Matcher:
 
 
         # 매칭 실행
+        try:
+            matching_start_time = time.time()
+            data = {"image0": image0, "image1": image1}
+            result = self.model(data)
+            self.matching_time = time.time() - matching_start_time
 
-        matching_start_time = time.time()
-        data = {"image0": image0, "image1": image1}
-        result = self.model(data)
-        self.matching_time = time.time() - matching_start_time
+            # 스케일 계산
+            s0 = np.array(target_image.shape[:2][::-1]) / np.array(image0.shape[-2:][::-1])
+            s1 = np.array(source_image.shape[:2][::-1]) / np.array(image1.shape[-2:][::-1])
 
-        # 스케일 계산
-        s0 = np.array(image0_origin.shape[:2][::-1]) / np.array(image0.shape[-2:][::-1])
-        s1 = np.array(image1_origin.shape[:2][::-1]) / np.array(image1.shape[-2:][::-1])
+            confidence = result["mconf"]
 
-        confidence = result["mconf"]
+            kpts0_shifted = result["keypoints0"] + 0.5
+            kpts1_shifted = result["keypoints1"] + 0.5
+            keypoints0 = self.scale_keypoints(kpts0_shifted, s0) - 0.5
+            keypoints1 = self.scale_keypoints(kpts1_shifted, s1) - 0.5
 
-        # 키포인트 스케일링 (효율성 개선: 중복 연산 제거)
-        kpts0_shifted = result["keypoints0"] + 0.5
-        kpts1_shifted = result["keypoints1"] + 0.5
-        keypoints0 = self.scale_keypoints(kpts0_shifted, s0) - 0.5
-        keypoints1 = self.scale_keypoints(kpts1_shifted, s1) - 0.5
+            self.logger.info(f"Matching completed! (matching time: {self.matching_time:.3f} seconds)")
+                
 
-        self.logger.info(f"Matching completed! (matching time: {self.matching_time:.3f} seconds)")
-        
-        # 디버그 모드일 때만 상세 통계 계산 (효율성 개선)
-        if self.logger.isEnabledFor(logging.DEBUG):
-            self.logger.debug(f"number of matches: {len(keypoints0)}")
-            # GPU에서 한 번에 통계 계산 후 CPU로 전송
-            conf_stats = torch.stack([torch.mean(confidence), torch.max(confidence), torch.min(confidence)])
-            conf_stats_cpu = conf_stats.cpu().numpy()
-            self.logger.debug(f"confidence stats - avg: {conf_stats_cpu[0]:.3f}, max: {conf_stats_cpu[1]:.3f}, min: {conf_stats_cpu[2]:.3f}")
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(f"number of matches: {len(keypoints0)}")
+                # GPU에서 한 번에 통계 계산 후 CPU로 전송
+                conf_stats = torch.stack([torch.mean(confidence), torch.max(confidence), torch.min(confidence)])
+                conf_stats_cpu = conf_stats.cpu().numpy()
+                self.logger.debug(f"confidence stats - avg: {conf_stats_cpu[0]:.3f}, max: {conf_stats_cpu[1]:.3f}, min: {conf_stats_cpu[2]:.3f}")
+        except Exception as e:
+            self.logger.error(f"Error occurred: {e}")
+            return None
 
         return {
             "keypoints0": keypoints0.cpu().numpy(),
@@ -300,8 +306,8 @@ class Matcher:
             "confidence": confidence.cpu().numpy(),
             "image0": image0.squeeze().cpu().numpy(),
             "image1": image1.squeeze().cpu().numpy(),
-            "image0_orig": image0_origin,
-            "image1_orig": image1_origin,
+            "image0_orig": target_image,
+            "image1_orig": source_image,
             "scale0": s0,
             "scale1": s1,
         }
@@ -413,7 +419,6 @@ class Matcher:
         plane_normal: np.ndarray = None,
         result3d: Tuple[np.ndarray, np.ndarray, np.ndarray] = None,
         result_image_name: str = "",
-        matches_result: Dict[str, Any] = None,
         ransac_result: Optional[Dict[str, Any]] = None,
         camera: Camera = None,
     ) -> None:
@@ -428,43 +433,18 @@ class Matcher:
             output_dir: 출력 디렉토리
         """
 
-
         if target_texture is not None:
             target_image = target_texture
         else:
             target_image = target_depth
 
-        visualize_matches(
-            target_image,
-            source_image,
-            matches_result["keypoints0"],
-            matches_result["keypoints1"],
-            matches_result["confidence"],
-            str(self.output_path / f"{result_image_name}_matches_original.png"),
-            confidence_threshold=self.config["confidence_threshold"],
-        )
+        if source_image is None:
+            self.logger.error("Source image not found")
+            return
 
-        # 2. RANSAC 필터링 후 결과 시각화 (디버그 모드에서만)
-        if ransac_result:
+        if ransac_result["homography"] is not None:
 
-            visualize_matches(
-                target_image,
-                source_image,
-                ransac_result["filtered_kpts0"],
-                ransac_result["filtered_kpts1"],
-                ransac_result["filtered_conf"],
-                str(
-                    self.output_path
-                    / f"{result_image_name}_matches_ransac_filtered.png"
-                ),
-                confidence_threshold=self.config["confidence_threshold"],
-            )
-
-            if ransac_result["homography"] is not None:
-
-                if target_image is not None and source_image is not None:
-                    # 이미지 변환 및 오버레이
-                    warp_result = warp_images(
+            warp_result = warp_images(
                         target_image,
                         source_image,
                         ransac_result["homography"],
@@ -472,13 +452,13 @@ class Matcher:
                         pointR_pos=self.config["pointR_pos"],
                         pointU_pos=self.config["pointU_pos"],
                         point_radius=self.config["point_radius"],
-                    )
+            )
 
-                    result1_3d, result2_3d, result3_3d = result3d
+            result1_3d, result2_3d, result3_3d = result3d
 
-                    center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
+            center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
 
-                    pcd = create_point_cloud_from_depth_image(
+            pcd = create_point_cloud_from_depth_image(
                         target_depth,  # depth 이미지
                         plane_normal,
                         center_point_3d,
@@ -489,31 +469,28 @@ class Matcher:
                         texture_image=(
                             target_texture if target_texture is not None else None
                         ),  # texture 이미지 (source 이미지 사용)
-                    )
-                    pcd.scale(1000.0, center=[0, 0, 0])
+            )
+            pcd.scale(1000.0, center=[0, 0, 0])
 
-                    o3d.io.write_point_cloud(
-                        str(self.output_path / f"{result_image_name}_with_normal.ply"),
-                        pcd,
-                    )
-                    self.logger.debug(
-                        f"PLY file saved: {self.output_path / f'{result_image_name}_with_normal.ply'}"
-                    )
+            o3d.io.write_point_cloud(
+                str(self.output_path / f"{result_image_name}_with_normal.ply"), pcd,
+            )
+            self.logger.debug(
+                f"PLY file saved: {self.output_path / f'{result_image_name}_with_normal.ply'}"
+            )
 
-                    if warp_result[0] is not None:
+            if warp_result[0] is None: 
+                self.logger.warning("Image transformation failed")
+                return
 
-                        output_file = str(
+            output_file = str(
                             self.output_path
                             / f"{result_image_name}_warped_overlapped.png"
-                        )
-                        cv2.imwrite(
-                            output_file, cv2.cvtColor(warp_result[0], cv2.COLOR_RGB2BGR)
-                        )
-                        self.logger.debug(f"Transformed image saved: {output_file}")
-                    else:
-                        self.logger.warning("Image transformation failed")
-                else:
-                    self.logger.error("Image loading failed")
+            )
+            cv2.imwrite(output_file, cv2.cvtColor(warp_result[0], cv2.COLOR_RGB2BGR))
+            self.logger.debug(f"Transformed image saved: {output_file}")
+        else:
+            self.logger.error("Homography matrix not found in ransac_result")
 
     def calculate_anchor_points(
         self,
@@ -784,7 +761,6 @@ class Matcher:
                 target_depth = self.camera.undistort_image(target_depth)
 
             if target_texture is not None:
-                texture_exist = True
                 target_image = target_texture
                 if self.config["image_undistortion"]:
                     target_image = self.camera.undistort_image(target_image)
@@ -794,34 +770,49 @@ class Matcher:
                     depth_max=self.config["depth_max"],
                 )
             else:
-                texture_exist = False
                 target_image = target_depth
                 target_clipped = process_depth_map(
                     depth_image=target_depth,
                     depth_max=self.config["depth_max"],
                 )
-            
-            # TIF 파일 등 non-RGB 이미지를 RGB로 변환
-            if len(source_image.shape) == 2:  # grayscale
-                source_image_rgb = cv2.cvtColor(source_image, cv2.COLOR_GRAY2RGB)
-                self.logger.debug("Converted grayscale source image to RGB")
-            elif len(source_image.shape) == 3 and source_image.shape[2] == 1:  # single channel
-                source_image_rgb = cv2.cvtColor(source_image, cv2.COLOR_GRAY2RGB)
-                self.logger.debug("Converted single-channel source image to RGB")
-            elif len(source_image.shape) == 3 and source_image.shape[2] == 4:  # RGBA
-                source_image_rgb = cv2.cvtColor(source_image, cv2.COLOR_RGBA2RGB)
-                self.logger.debug("Converted RGBA source image to RGB")
-            else:
-                source_image_rgb = source_image  # 이미 RGB인 경우
-
-            matches = self.run_matching(target_clipped, source_image_rgb)
-
+            time_start = time.time()
+            matches = self.run_matching(target_clipped, source_image)
+            time_end = time.time()
+            self.logger.info(f"Matching time: {time_end - time_start:.3f} seconds")
+            if self.config["debug_mode"] and matches is not None:
+                visualize_matches(
+                    target_clipped,
+                    source_image,
+                    matches["keypoints0"],
+                    matches["keypoints1"],
+                    matches["confidence"],
+                    str(self.output_path / f"{self.target_texture_name}_matches_original.png"),
+                    confidence_threshold=self.config["confidence_threshold"],
+                )
+            time_start = time.time()
             filtered_matches = self.run_ransac_filtering(matches)
-
+            time_end = time.time()
+            self.logger.info(f"RANSAC filtering time: {time_end - time_start:.3f} seconds")
+            if self.config["debug_mode"] and filtered_matches is not None:
+                visualize_matches(
+                    target_clipped,
+                    source_image,
+                    filtered_matches["filtered_kpts0"],
+                    filtered_matches["filtered_kpts1"],
+                    filtered_matches["filtered_conf"],
+                    str(
+                        self.output_path
+                        / f"{self.target_texture_name}_matches_ransac_filtered.png"
+                    ),
+                    confidence_threshold=self.config["confidence_threshold"],
+                )
+            
+            time_start = time.time()
             if self.config["geometry_type"] == "Fundamental":
                 source_depth = source_image  # 원본 depth 이미지 사용 (RGB 변환 전)
                 filtered_matches = self.run_matching_3d(filtered_matches, target_depth, source_depth)
-
+            time_end = time.time()
+            self.logger.info(f"3D matching time: {time_end - time_start:.3f} seconds")
             if filtered_matches is None:
                 return None, None, None, None
 
@@ -847,7 +838,7 @@ class Matcher:
             if depth_result is None:
                 self._save_failed_matches(
                     target_clipped,
-                    source_image_rgb,
+                    source_image,
                     matches,
                     filtered_matches,
                     self.output_path,
@@ -876,7 +867,6 @@ class Matcher:
 
             # 4. 결과 시각화
             if self.config["debug_mode"]:
-
                 save_points_to_yaml(
                     Path(target_depth_path),
                     target_depth.shape[:2],
@@ -892,17 +882,12 @@ class Matcher:
                 self.logger.info("Points information is saved to YAML file.")
 
                 self.visualize_results(
-                    target_texture=target_clipped if texture_exist else None,
+                    target_texture=target_clipped,
                     target_depth=target_depth,
-                    source_image=source_image_rgb,
+                    source_image=source_image,
                     plane_normal=plane_normal,
                     result3d=(result1_3d, result2_3d, result3_3d),
-                    result_image_name=(
-                        self.target_texture_name
-                        if texture_exist
-                        else self.target_depth_name
-                    ),
-                    matches_result=matches,
+                    result_image_name=(self.target_texture_name),
                     ransac_result=filtered_matches,
                     camera=self.camera,
                 )
@@ -959,226 +944,272 @@ class Matcher:
             3D 매칭 결과 딕셔너리 또는 None
         """
         try:
-            # 1. Fundamental Matrix 추출
-            if "Fundamental" not in filtered_matches.get("geom_info", {}):
-                self.logger.error("Fundamental matrix not found in filtered matches")
-                return None
+            # # 1. Fundamental Matrix 추출
+            # if "Fundamental" not in filtered_matches.get("geom_info", {}):
+            #     self.logger.error("Fundamental matrix not found in filtered matches")
+            #     return None
                 
-            F = np.array(filtered_matches["geom_info"]["Fundamental"])
-            self.logger.debug(f"Fundamental matrix: {F}")
+            # F = np.array(filtered_matches["geom_info"]["Fundamental"])
+            # self.logger.debug(f"Fundamental matrix: {F}")
             
-            # 2. 카메라 내부 파라미터 추출
-            K = self.camera.K  # 3x3 intrinsic matrix
-            self.logger.debug(f"Intrinsic matrix: {K}")
+            # E = K.T @ F @ K
+            # self.logger.debug(f"Essential matrix: {E}")
             
-            # 3. Essential Matrix 계산: E = K2^T * F * K1
-            # 단일 카메라이므로 K1 = K2 = K
-            E = K.T @ F @ K
-            self.logger.debug(f"Essential matrix: {E}")
-            
-            # 4. Relative Pose 추출 (R, t)
-            # OpenCV의 recoverPose 사용
-            keypoints0 = filtered_matches["filtered_kpts0"]
-            keypoints1 = filtered_matches["filtered_kpts1"]
-            
-            # 정수 좌표로 변환
-            pts0 = keypoints0.astype(np.int32)
-            pts1 = keypoints1.astype(np.int32)
-            
-            # recoverPose로 R, t 추출
-            retval, R, t, mask = cv2.recoverPose(E, pts0, pts1, K)
-            
-            if retval == 0:
-                self.logger.error("Failed to recover pose from essential matrix")
-                return None
+            keypoints0 = filtered_matches["filtered_kpts0"].astype(np.int32)
+            keypoints1 = filtered_matches["filtered_kpts1"].astype(np.int32)
+
+
+            # if target_depth_scale > 0 and source_depth_scale > 0:
+            #     # 8-bit → 원본 복원 (원본 범위: 0-2472.207763671875)
+            #     # 8-bit (0-255) → 원본 depth 범위로 복원
+            #     original_max = 2002.207763671875  # 원본 최대값
+            #     original_min = 0.0  # 원본 최소값
                 
-            self.logger.info(f"Recovered pose - inliers: {retval}")
-            self.logger.debug(f"Rotation matrix:\n {R}")
-            self.logger.debug(f"Translation vector:\n {t}")
-            
-            # 5. Depth 이미지에서 3D 포인트 추출
-            if depth_target is None or depth_source is None:
-                self.logger.error("Depth images are required for 3D matching")
-                return None
+            #     depth_source_restored = depth_source.copy().astype(np.float32)
+            #     valid_mask = depth_source > 0
                 
-            self.logger.info("Using depth images for 3D point extraction")
+            #     # 8-bit 정규화 복원: (pixel_value / 255.0) * (original_range) + original_min
+            #     depth_source_restored[valid_mask] = (depth_source[valid_mask] / 255.0) * (original_max - original_min) + original_min
+            #     depth_source = depth_source_restored
+                
+            #     self.logger.info(f"Applied 8-bit to original depth restoration")
+            #     self.logger.debug(f"8-bit range: 0-255 → Original range: {original_min:.2f}-{original_max:.2f}")
+            #     self.logger.debug(f"Target depth scale: {target_depth_scale:.2f}, Source depth scale: {source_depth_scale:.2f}")
+            # else:
+            #     self.logger.warning("Could not compute depth scale factor, using original depth values")
+                
+            # self.logger.info("Using depth images for 3D point extraction")
             
             # 매칭된 키포인트에서 유효한 depth 값만 추출
             valid_indices = []
-            points_3d_0 = []
-            points_3d_1 = []
+            points_3d_target = []
+            points_3d_source = []
 
             # if depth_target.dtype == np.uint8:
             #     depth_target = depth_target.astype(np.float32)
             # if depth_source.dtype == np.uint8:
             #     depth_source = depth_source.astype(np.float32)
             
+            
 
             valid_count = 0
             boundary_fail_count = 0
             zero_depth_count = 0
             
-            for i, (pt0, pt1) in enumerate(zip(pts0, pts1)):
+            # for문 밖에서 미리 처리 - depth 이미지 채널 정규화
+            if len(depth_target.shape) == 3:
+                depth_target_2d = depth_target[:, :, 0]  # 첫 번째 채널만 사용
+            else:
+                depth_target_2d = depth_target
+                
+            if len(depth_source.shape) == 3:
+                depth_source_2d = depth_source[:, :, 0]  # 첫 번째 채널만 사용
+            else:
+                depth_source_2d = depth_source
+            
+            for i, (pt0, pt1) in enumerate(zip(keypoints0, keypoints1)):
                 x0, y0 = int(pt0[0]), int(pt0[1])
                 x1, y1 = int(pt1[0]), int(pt1[1])
                 
                 # 이미지 경계 확인
-                if (0 <= x0 < depth_target.shape[1] and 0 <= y0 < depth_target.shape[0] and
-                    0 <= x1 < depth_source.shape[1] and 0 <= y1 < depth_source.shape[0]):
+                if (0 <= x0 < depth_target_2d.shape[1] and 0 <= y0 < depth_target_2d.shape[0] and
+                    0 <= x1 < depth_source_2d.shape[1] and 0 <= y1 < depth_source_2d.shape[0]):
                     
-                    # 3채널 depth 이미지에서 첫 번째 채널만 사용
-                    if len(depth_target.shape) == 3:
-                        d0 = depth_target[y0, x0, 0]  # 첫 번째 채널
-                    else:
-                        d0 = depth_target[y0, x0]
-                    
-                    if len(depth_source.shape) == 3:
-                        d1 = depth_source[y1, x1, 0]  # 첫 번째 채널
-                    else:
-                        d1 = depth_source[y1, x1]
-                    
-                    # # numpy 배열을 스칼라로 안전하게 변환
-                    # try:
-                    #     d0 = float(d0)
-                    #     d1 = float(d1)
-                    # except (ValueError, TypeError):
-                    #     continue  # 변환 실패 시 해당 포인트 건너뛰기
-                    
-                    
-                    if d0 > 0.0 and d1 > 0.0:
-                        valid_count += 1
+                    # 정규화된 2D depth 이미지에서 값 추출
+                    d0 = depth_target_2d[y0, x0]
+                    d1 = depth_source_2d[y1, x1]  
+   
+                    valid_count += 1
                         # 2D → 3D 변환
-                        z0 = d0
-                        z1 = d1
+                    z0 = d0
+                    z1 = d1
                         
-                        x3d_0 = (x0 - K[0, 2]) * z0 / K[0, 0]
-                        y3d_0 = (y0 - K[1, 2]) * z0 / K[1, 1]
+                    x3d_0 = (x0 - self.camera.K[0, 2]) * z0 / self.camera.K[0, 0]
+                    y3d_0 = (y0 - self.camera.K[1, 2]) * z0 / self.camera.K[1, 1]
                         
-                        x3d_1 = (x1 - K[0, 2]) * z1 / K[0, 0]
-                        y3d_1 = (y1 - K[1, 2]) * z1 / K[1, 1]
+                    x3d_1 = (x1 - self.camera.K[0, 2]) * z1 / self.camera.K[0, 0]
+                    y3d_1 = (y1 - self.camera.K[1, 2]) * z1 / self.camera.K[1, 1]
                         
-                        points_3d_0.append([x3d_0, y3d_0, z0])
-                        points_3d_1.append([x3d_1, y3d_1, z1])
-                        valid_indices.append(i)
-                    else:
-                        zero_depth_count += 1
+                    points_3d_target.append([x3d_0, y3d_0, z0])
+                    points_3d_source.append([x3d_1, y3d_1, z1])
+                    valid_indices.append(i)
+                
                 else:
                     boundary_fail_count += 1
             
             # 통계 정보 로깅
             self.logger.debug(f"Point processing stats:")
-            self.logger.debug(f"  - Total points: {len(pts0)}")
+            self.logger.debug(f"  - Total points: {len(keypoints0)}")
             self.logger.debug(f"  - Valid 3D points: {valid_count}")
             self.logger.debug(f"  - Boundary failures: {boundary_fail_count}")
             self.logger.debug(f"  - Zero depth: {zero_depth_count}")
             
-            if len(points_3d_0) < 4:
-                self.logger.error(f"Insufficient valid 3D points: {len(points_3d_0)}")
+            if len(points_3d_target) < 4:
+                self.logger.error(f"Insufficient valid 3D points: {len(points_3d_target)}")
                 return None
             
-            points_3d_0 = np.array(points_3d_0)
-            points_3d_1 = np.array(points_3d_1)
-            
-            self.logger.info(f"Extracted {len(points_3d_0)} valid 3D points from depth images")
-            
-            # 스케일 정규화 (두 point cloud 간의 스케일 차이 해결)
-            # Target과 Source의 depth 범위를 맞춤
-            target_depth_scale = np.percentile(points_3d_0[:, 2], 95)  # 95% percentile 사용
-            source_depth_scale = np.percentile(points_3d_1[:, 2], 95)
-            
-            if target_depth_scale > 0 and source_depth_scale > 0:
-                scale_factor = target_depth_scale / source_depth_scale
-                points_3d_1 = points_3d_1 * scale_factor
-                self.logger.info(f"Applied scale normalization: factor={scale_factor:.3f}")
-                self.logger.debug(f"Target depth scale: {target_depth_scale:.2f}, Source depth scale: {source_depth_scale:.2f}")
+            points_3d_target = np.array(points_3d_target)
+            points_3d_source = np.array(points_3d_source)
+
+            correspondences = [[i, i] for i in valid_indices]
+            #correspondences = o3d.utility.Vector2iVector(correspondences)
+            pcd_target = o3d.geometry.PointCloud()
+            pcd_source = o3d.geometry.PointCloud()
+
+            pcd_target.points = o3d.utility.Vector3dVector(points_3d_target)
+            pcd_source.points = o3d.utility.Vector3dVector(points_3d_source)
+
+            # RANSAC registration with known correspondences
+            if self.config["pose_estimation_method"] == "ransac":
+                # Config에서 RANSAC 파라미터 가져오기
+                ransac_3d_config = self.config.get("ransac_3d", {})
+                pose = registration_ransac_based_on_correspondence(
+                    pcd_source, pcd_target, correspondences,
+                    max_correspondence_distance=ransac_3d_config.get("max_correspondence_distance", 0.1),
+                    ransac_n=ransac_3d_config.get("ransac_n", 7),
+                    max_iterations=ransac_3d_config.get("max_iterations", 5000),
+                    confidence=ransac_3d_config.get("confidence", 0.9999)
+                )
+            elif self.config["pose_estimation_method"] == "svd":
+                # Open3D PointCloud에서 numpy array로 변환
+                points_source_np = np.asarray(pcd_source.points)
+                points_target_np = np.asarray(pcd_target.points)
+                
+                # Point cloud 통계 정보
+
+                
+                pose = solve_rigid_transform_between_points(points_source_np, points_target_np)
             else:
-                self.logger.warning("Could not compute scale factor, using original coordinates")
+                raise ValueError(f"Invalid method: {self.config['pose_estimation_method']}")
+
+            # 공통 pose 검증
+            self.logger.info(f"Initial pose result:")
+            self.logger.info(f"  Rotation det: {np.linalg.det(pose[:3, :3]):.6f}")
+            self.logger.info(f"  Translation: {pose[:3, 3]}")
+            self.logger.info(f"  Translation norm: {np.linalg.norm(pose[:3, 3]):.3f}")
             
-            self.logger.debug(f"3D points - pcd0:\n {points_3d_0}, pcd1:\n {points_3d_1}")
+            if pose is None:
+                self.logger.error("Intial pose estimation failed")
+                return None
             
             # 6. Open3D Point Cloud 생성
-            pcd0 = o3d.geometry.PointCloud()
-            pcd1 = o3d.geometry.PointCloud()
+
+            pcd_source_transformed = copy.deepcopy(pcd_source)
             
-            pcd0.points = o3d.utility.Vector3dVector(points_3d_0)
-            pcd1.points = o3d.utility.Vector3dVector(points_3d_1)
-            
-            # 6.5. Relative pose로 변환한 point cloud 저장 (ICP 전)
-            # recoverPose에서 반환된 R, t는 두 번째 카메라에서 첫 번째 카메라로의 변환
-            # 따라서 첫 번째 카메라 좌표계로 변환하려면 역변환을 사용해야 함
-            R_inv = R.T  # 회전의 역변환
-            t_inv = -R.T @ t  # 이동의 역변환
-            
-            # 두 번째 이미지의 3D 포인트를 첫 번째 카메라 좌표계로 변환
-            points_3d_1_transformed = (R_inv @ points_3d_1.T + t_inv).T
-            
-            # 변환된 point cloud 생성
-            pcd1_transformed = o3d.geometry.PointCloud()
-            pcd1_transformed.points = o3d.utility.Vector3dVector(points_3d_1_transformed)
-            
+            pcd_source_transformed.transform(pose)
             # 색상 설정 (시각화용)
-            pcd0.paint_uniform_color([1, 0, 0])  # 빨간색 (target)
-            pcd1_transformed.paint_uniform_color([0, 1, 0])  # 초록색 (source transformed)
+            #pcd_target.paint_uniform_color([1, 0, 0])  # 빨간색 (target)
+            #pcd_source.paint_uniform_color([0, 1, 0])  # 초록색 (source)
+            #pcd_source_transformed.paint_uniform_color([0, 0, 1])  # 파란색 (source transformed)
             
             # 두 point cloud 합치기
-            
-            combined_pcd = pcd0 + pcd1_transformed
+
+            #combined_pcd = pcd0 + pcd1_transformed
             
             # 저장
             output_path = Path(self.config.get("output_dir", "output"))
             output_path.mkdir(exist_ok=True)
             
             # 파일명 생성
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            pcd_filename = f"{timestamp}_combined_pcd_before_icp.ply"
-            pcd_filename_transformed = f"{timestamp}_combined_pcd_before_icp_transformed.ply"
-            pcd_filename_0 = f"{timestamp}_combined_pcd_before_icp_0.ply"
-            pcd_path = output_path / pcd_filename
+            pcd_filename_transformed = f"{self.target_texture_name}_pcd_before_icp_transformed_source.ply"
+            pcd_filename_target = f"{self.target_texture_name}_pcd_before_icp_target.ply"
+            pcd_filename_source = f"{self.target_texture_name}_pcd_before_icp_source.ply"
             pcd_path_transformed = output_path / pcd_filename_transformed
-            pcd_path_0 = output_path / pcd_filename_0
-            
-            # PLY 파일로 저장
-            o3d.io.write_point_cloud(str(pcd_path), combined_pcd)
-            self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path}")
-            o3d.io.write_point_cloud(str(pcd_path_transformed), pcd1_transformed)
+            pcd_path_target = output_path / pcd_filename_target
+            pcd_path_source = output_path / pcd_filename_source
+
+            # Before ICP 저장 (원본 상태)
+            o3d.io.write_point_cloud(str(pcd_path_transformed), pcd_source_transformed.paint_uniform_color([0, 0, 1]))
             self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_transformed}")
-            o3d.io.write_point_cloud(str(pcd_path_0), pcd0)
-            self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_0}")
+            o3d.io.write_point_cloud(str(pcd_path_target), pcd_target.paint_uniform_color([1, 0, 0]))
+            self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_target}")
+            o3d.io.write_point_cloud(str(pcd_path_source), pcd_source.paint_uniform_color([0, 1, 0]))
+            self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_source}")
             
-            # 7. GICP 정합
-            gicp = o3d.pipelines.registration.TransformationEstimationPointToPoint()
+            # # 아웃라이어 제거 (ICP 전 전처리)
+            # statistical_nb_neighbors = 20
+            # statistical_std_ratio = 3.0
+            # pcd_source_clean, _ = pcd_source.remove_statistical_outlier(
+            #     nb_neighbors=statistical_nb_neighbors, std_ratio=statistical_std_ratio)
+            # pcd_target_clean, _ = pcd_target.remove_statistical_outlier(
+            #     nb_neighbors=statistical_nb_neighbors, std_ratio=statistical_std_ratio)
             
-            # 초기 변환 행렬 (R, t를 4x4 변환 행렬로 변환)
-            initial_transform = np.eye(4)
-            initial_transform[:3, :3] = R
-            initial_transform[:3, 3] = t.flatten()
+            # # 아웃라이어 제거된 point cloud로 변환된 버전 생성
+            # pcd_source_transformed_clean = copy.deepcopy(pcd_source_clean)
+            # pcd_source_transformed_clean.transform(pose)
+
+            # if not pcd_target_clean.has_normals():
+            #     pcd_target_clean.estimate_normals(
+            #         o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        
+            # if not pcd_source_transformed_clean.has_normals():
+            #     pcd_source_transformed_clean.estimate_normals(
+            #         o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+
+            # # Multi-stage ICP (점진적 정밀도 향상)
+            # icp_stages = [
+            #     {"max_correspondence_distance": 0.1, "max_iteration": 1000, "relative_fitness": 1e-4, "relative_rmse": 1e-4},  # Stage 1: 관대한 설정
+            #     {"max_correspondence_distance": 0.05, "max_iteration": 1000, "relative_fitness": 1e-5, "relative_rmse": 1e-5},  # Stage 2: 중간 설정
+            #     {"max_correspondence_distance": 0.02, "max_iteration": 2000, "relative_fitness": 1e-6, "relative_rmse": 1e-6},  # Stage 3: 정밀한 설정
+            # ]
             
-            # GICP 실행
-            result = o3d.pipelines.registration.registration_icp(
-                pcd0, pcd1, 
-                max_correspondence_distance=0.1,  # 임계값
-                init=initial_transform,
-                estimation_method=gicp,
-                criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
-                    relative_fitness=1e-6,
-                    relative_rmse=1e-6,
-                    max_iteration=50
-                )
-            )
+            # current_pose = np.eye(4) 
+            # result = None
             
-            self.logger.info(f"GICP registration completed")
-            self.logger.debug(f"Fitness: {result.fitness}")
-            self.logger.debug(f"RMSE: {result.inlier_rmse}")
+            # for stage_idx, stage_params in enumerate(icp_stages):
+            #     self.logger.info(f"ICP Stage {stage_idx + 1}: max_correspondence_distance={stage_params['max_correspondence_distance']}")
+                
+            #     stage_result = o3d.pipelines.registration.registration_icp(
+            #         pcd_source_transformed_clean, pcd_target_clean,
+            #         max_correspondence_distance=stage_params["max_correspondence_distance"],
+            #         init=current_pose,
+            #         estimation_method=o3d.pipelines.registration.TransformationEstimationForGeneralizedICP(),
+            #         criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
+            #             relative_fitness=stage_params["relative_fitness"],
+            #             relative_rmse=stage_params["relative_rmse"],
+            #             max_iteration=stage_params["max_iteration"]
+            #         )
+            #     )
+                
+            #     self.logger.info(f"Stage {stage_idx + 1} Result - Fitness: {stage_result.fitness:.4f}, RMSE: {stage_result.inlier_rmse:.4f}")
+                
+            #     # 다음 stage를 위한 pose 업데이트
+            #     current_pose = stage_result.transformation
+            #     result = stage_result  # 최종 결과 저장
+                
+            #     # 조기 종료 조건 (충분히 좋은 결과)
+            #     if stage_result.fitness > 0.8:
+            #         self.logger.info(f"Early termination at stage {stage_idx + 1} due to high fitness")
+            #         break
+            # # result = o3d.pipelines.registration.registration_icp(
+            # #         pcd_target, pcd_target, 0.01, pose,
+            # #         o3d.pipelines.registration.TransformationEstimationPointToPlane())
+            # self.logger.info(f"GICP Result - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
+            # self.logger.info(f"GICP converged: {result.fitness > 0.1}")  # fitness > 0.1이면 성공으로 간주
+
+            # # Multi-stage ICP 결과를 원본 source point cloud에 적용
+            # pcd_source_transformed2 = copy.deepcopy(pcd_source_clean)
+            # # 초기 pose + ICP 결과를 결합
+            # final_transformation = result.transformation @ pose
+            # pcd_source_transformed2.transform(final_transformation)
+            # pcd_source_transformed2.paint_uniform_color([0, 1, 1])  #  
+            
+            # # 변환된 point cloud 저장
+            # pcd_filename_transformed = f"{self.target_texture_name}_pcd_after_icp_transformed_source.ply"
+            # pcd_path_transformed = output_path / pcd_filename_transformed
+            # o3d.io.write_point_cloud(str(pcd_path_transformed), pcd_source_transformed2)
+            # self.logger.info(f"Combined point cloud (after ICP) saved: {pcd_path_transformed}")
+
+
+        
             
             # 8. 결과 반환
             return {
-                "fundamental_matrix": F,
-                "essential_matrix": E,
-                "rotation": R,
-                "translation": t,
-                "points_3d_0": points_3d_0,
-                "points_3d_1": points_3d_1,
-                "gicp_result": result,
+                # "fundamental_matrix": F,
+                # "essential_matrix": E,
+                "points_3d_target": points_3d_target,
+                #"points_3d_source": points_3d_source,
+                #"gicp_result": result,
                 "fitness": result.fitness,
                 "rmse": result.inlier_rmse,
                 "transformation": result.transformation

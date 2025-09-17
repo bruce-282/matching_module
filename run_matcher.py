@@ -103,7 +103,7 @@ def main():
          
 
             result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(
-                target_texture=target_texture,
+                target_texture=None,
                 target_depth=target_depth,
                 source_image=source_image,
                 target_texture_path=texture_file,
