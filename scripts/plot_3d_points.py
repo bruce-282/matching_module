@@ -44,6 +44,11 @@ def extract_point_data(points_3d):
         normal = points_3d["plane_normal"]
         data["plane_normal"] = [normal["x"], normal["y"], normal["z"]]
 
+    # normal_angles 추출
+    if "normal_angles" in points_3d:
+        angles = points_3d["normal_angles"]
+        data["normal_angles"] = [angles["horizontal"], angles["vertical"]]
+
     # 각 포인트 추출
     for point_name in ["pointL", "pointR", "pointU"]:
         if point_name in points_3d:
@@ -65,32 +70,55 @@ def plot_3d_data(all_data, output_dir):
     indices = list(all_data.keys())
     indices.sort()
 
-    # pointL, pointR, pointU만 처리
-    data_types = ["pointL", "pointR", "pointU"]
+    # pointL, pointR, pointU, normal_angles 처리
+    data_types = ["pointL", "pointR", "pointU", "normal_angles"]
 
     for data_type in data_types:
         if not any(data_type in data for data in all_data.values()):
             continue
 
-        # 하나의 그래프에 X, Y, Z 3개 라인 생성
-        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
-        fig.suptitle(f"{data_type} - Coordinate Changes by Index", fontsize=16)
+        # normal_angles인 경우와 일반 포인트인 경우 구분
+        if data_type == "normal_angles":
+            # Normal angles 그래프
+            fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+            fig.suptitle(f"{data_type} - Angle Changes by Index", fontsize=16)
 
-        # 각 좌표별로 데이터 수집
-        coord_data = {"X": [], "Y": [], "Z": []}
-        valid_indices = []
+            # 각 각도별로 데이터 수집
+            coord_data = {"Horizontal": [], "Vertical": []}
+            valid_indices = []
 
-        for idx in indices:
-            if data_type in all_data[idx]:
-                point = all_data[idx][data_type]
-                coord_data["X"].append(point[0])
-                coord_data["Y"].append(point[1])
-                coord_data["Z"].append(point[2])
-                valid_indices.append(idx)
+            for idx in indices:
+                if data_type in all_data[idx]:
+                    angles = all_data[idx][data_type]
+                    coord_data["Horizontal"].append(angles[0])
+                    coord_data["Vertical"].append(angles[1])
+                    valid_indices.append(idx)
 
-        # X, Y, Z 좌표를 하나의 그래프에 표시
-        coord_names = ["X", "Y", "Z"]
-        colors = ["red", "green", "blue"]
+            # Horizontal, Vertical 각도를 하나의 그래프에 표시
+            coord_names = ["Horizontal", "Vertical"]
+            colors = ["orange", "purple"]
+            ylabel = "Angle (deg)"
+        else:
+            # 일반 포인트 그래프
+            fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+            fig.suptitle(f"{data_type} - Coordinate Changes by Index", fontsize=16)
+
+            # 각 좌표별로 데이터 수집
+            coord_data = {"X": [], "Y": [], "Z": []}
+            valid_indices = []
+
+            for idx in indices:
+                if data_type in all_data[idx]:
+                    point = all_data[idx][data_type]
+                    coord_data["X"].append(point[0])
+                    coord_data["Y"].append(point[1])
+                    coord_data["Z"].append(point[2])
+                    valid_indices.append(idx)
+
+            # X, Y, Z 좌표를 하나의 그래프에 표시
+            coord_names = ["X", "Y", "Z"]
+            colors = ["red", "green", "blue"]
+            ylabel = "Coordinate Value (mm)"
 
         for i, (coord_name, values) in enumerate(coord_data.items()):
             if values:  # 값이 있는 경우만 플롯
@@ -120,7 +148,7 @@ def plot_3d_data(all_data, output_dir):
                     )
 
         ax.set_xlabel("File Index", fontsize=12)
-        ax.set_ylabel("Coordinate Value (mm)", fontsize=12)
+        ax.set_ylabel(ylabel, fontsize=12)
         ax.set_title(f"{data_type}", fontsize=14, fontweight="bold")
         ax.grid(True, alpha=0.3)
         ax.set_xticks(valid_indices)
@@ -156,8 +184,17 @@ def create_error_bar_plot(data_type, coord_data, valid_indices, output_dir):
     fig, ax = plt.subplots(1, 1, figsize=(12, 8))
     fig.suptitle(f"{data_type} - Coordinate Changes", fontsize=16)
 
-    coord_names = ["X", "Y", "Z"]
-    colors = ["red", "green", "blue"]
+    # normal_angles인 경우와 일반 포인트인 경우 구분
+    if data_type == "normal_angles":
+        coord_names = ["Horizontal", "Vertical"]
+        colors = ["orange", "purple"]
+        ylabel = "Angle (deg)"
+        unit = "deg"
+    else:
+        coord_names = ["X", "Y", "Z"]
+        colors = ["red", "green", "blue"]
+        ylabel = "Coordinate Value (mm)"
+        unit = "mm"
 
     # 각 좌표별로 편차 계산 및 플롯
     for i, (coord_name, values) in enumerate(coord_data.items()):
@@ -184,7 +221,7 @@ def create_error_bar_plot(data_type, coord_data, valid_indices, output_dir):
                 capsize=8,
                 capthick=2,
                 elinewidth=2,
-                label=f"{coord_name} Coordinate (σ=±{std_dev:.2f}mm)",
+                label=f"{coord_name} Coordinate (σ=±{std_dev:.2f}{unit})",
             )
 
             # 각 점에 값만 표시 (편차는 범례에만)
@@ -226,7 +263,7 @@ def create_error_bar_plot(data_type, coord_data, valid_indices, output_dir):
                 )
 
     ax.set_xlabel("File Index", fontsize=12)
-    ax.set_ylabel("Coordinate Value (mm)", fontsize=12)
+    ax.set_ylabel(ylabel, fontsize=12)
     ax.set_title(
         f"{data_type}",
         fontsize=14,
@@ -236,14 +273,19 @@ def create_error_bar_plot(data_type, coord_data, valid_indices, output_dir):
     ax.set_xticks(valid_indices)
     ax.legend(fontsize=11)
 
-    # Y축 범위를 최대값보다 1000 더해서 오차 막대 공간 확보
+    # Y축 범위를 최대값보다 여유있게 설정
     all_values = []
     for values in coord_data.values():
         all_values.extend(values)
     if all_values:
         y_min, y_max = min(all_values), max(all_values)
-        # 최대값보다 1000을 더해서 오차 막대가 들어갈 공간 확보
-        ax.set_ylim(y_min - 100, y_max + 1000)
+        y_range = y_max - y_min
+        if data_type == "normal_angles":
+            # 각도의 경우 작은 범위로 설정
+            ax.set_ylim(y_min - y_range * 0.2, y_max + y_range * 0.2)
+        else:
+            # 좌표의 경우 큰 범위로 설정
+            ax.set_ylim(y_min - 100, y_max + 1000)
 
     # 저장
     output_path = os.path.join(output_dir, f"{data_type}_error_bars.png")

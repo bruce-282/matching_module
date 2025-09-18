@@ -7,8 +7,6 @@ from re import L, S, T
 import sys
 from pathlib import Path
 import numpy as np
-from ..utils.pcd_utils import compute_plane_normal
-import cv2
 import time
 import torch
 import torchvision.transforms.functional as F
@@ -33,9 +31,8 @@ from ..utils.image_utils import resize_image, process_depth_map
 from ..utils.viz_utils import visualize_matches, warp_images
 from ..utils.processing_utils import filter_matches, registration_ransac_based_on_correspondence, solve_rigid_transform_between_points
 from ..utils.io_utils import save_points_to_yaml
-from ..utils.pcd_utils import create_point_cloud_from_depth_image
+from ..utils.pcd_utils import create_point_cloud_from_depth_image, normal_to_angles,compute_plane_normal, is_ply_file
 from ..utils.camera_utils import Camera
-from ..utils.pcd_utils import is_ply_file
 from ..utils.depth_utils import (
     point_cloud_to_depth_map,
     find_depth_from_2d_robust,
@@ -879,12 +876,18 @@ class Matcher:
 
             # 4. 결과 시각화
             if self.config["debug_mode"]:
+                
+                result_3d_points = (result1_3d, result2_3d, result3_3d) 
+                
+                normal_angles = normal_to_angles(plane_normal)
+                
+                self.logger.debug(f"horizontal_deg: {normal_angles[0]:.1f}°, vertical_deg: {normal_angles[1]:.1f}°")
+
                 save_points_to_yaml(
                     target_depth.shape[:2],
-                    result1_3d,
-                    result2_3d,
-                    result3_3d,
+                    result_3d_points,
                     plane_normal,
+                    normal_angles,
                     self.target_texture_name,
                     self.output_path,
                 )
@@ -895,7 +898,7 @@ class Matcher:
                     target_depth=target_depth,
                     source_image=source_image,
                     plane_normal=plane_normal,
-                    result3d=(result1_3d, result2_3d, result3_3d),
+                    result3d=result_3d_points,
                     ransac_result=filtered_matches,
                     camera=self.camera,
                     result_image_name=self.target_texture_name,

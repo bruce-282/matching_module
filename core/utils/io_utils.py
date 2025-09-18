@@ -213,10 +213,9 @@ def create_camera_from_yaml_config(config: Dict[str, Any]):
 
 def save_points_to_yaml(
     image_size: Tuple[int, int],
-    point1_3d: Optional[np.ndarray] = None,
-    point2_3d: Optional[np.ndarray] = None,
-    point3_3d: Optional[np.ndarray] = None,
+    result_3d_points: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]] = None,
     plane_normal: Optional[np.ndarray] = None,
+    normal_angles: Optional[Tuple[float, float]] = None,
     image_name: Optional[str] = None,
     output_path: Optional[Path] = None,
 ) -> None:
@@ -244,9 +243,10 @@ def save_points_to_yaml(
         },
     }
 
+    point1_3d, point2_3d, point3_3d = result_3d_points
     # 3D 정보가 있는 경우 추가
-    if point1_3d is not None and point2_3d is not None:
-        points_data["transformed_points_3d"] = {
+
+    points_data["transformed_points_3d"] = {
             "pointL": {
                 "x": float(point1_3d[0] if point1_3d is not None else 0),
                 "y": float(point1_3d[1] if point1_3d is not None else 0),
@@ -267,7 +267,13 @@ def save_points_to_yaml(
                 "y": float(plane_normal[1] if plane_normal is not None else 0),
                 "z": float(plane_normal[2] if plane_normal is not None else 0),
             },
-        }
+            "normal_angles": {
+                "horizontal": float(normal_angles[0] if normal_angles is not None else 0),
+                "vertical": float(normal_angles[1] if normal_angles is not None else 0),
+            },
+            "point_unit": "mm",
+            "normal_unit": "deg",
+    }
 
     # source 이미지 이름으로 yaml 파일 생성
     yaml_path = output_path / f"{image_name}_result.yaml"

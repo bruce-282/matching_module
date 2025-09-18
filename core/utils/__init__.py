@@ -17,6 +17,7 @@ from .pcd_utils import (
     is_ply_file,
     # get_image_from_file,
     PointCloudToImageConverter,
+    normal_to_angles,
 )
 from .depth_utils import (
     point_cloud_to_depth_map,
@@ -43,6 +44,7 @@ __all__ = [
     "load_ply_as_image",
     "is_ply_file",
     "PointCloudToImageConverter",
+    "normal_to_angles",
     "point_cloud_to_depth_map",
     "find_3d_from_2d_depthmap_robust",
     "find_3d_from_2d_depthmap",
