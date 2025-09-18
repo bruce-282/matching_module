@@ -7,27 +7,33 @@ input_dir: "datasets/0910/"
 output_dir: "output0910"
 
 # 매칭 파라미터 (와이드 이미지용 조정)
-max_keypoints: 4000  # 와이드 이미지이므로 더 많은 키포인트
+max_keypoints: 5000  # 와이드 이미지이므로 더 많은 키포인트
 
 geometry_type: "Homography"
 ransac_method: "CV2_USAC_MAGSAC"
-ransac_reproj_threshold: 12.0  # 와이드 이미지용 낮은 임계값
-ransac_max_iter: 10000
+ransac_reproj_threshold: 8.0  # 와이드 이미지용 낮은 임계값
+ransac_max_iter: 30000
 ransac_confidence: 0.9999
 debug_mode: true
 
 # 포인트 위치 설정 (와이드 이미지용 조정)
-pointL_pos:
-  x_ratio: 0.47
-  y_ratio: 0.9
+selected_points:
+  L:
+    x: 15.694034576416016
+    y: 334.7763671875
+    z: 1338.4677734375
+  R:
+    x: 350.3045349121094
+    y: 428.72760009765625
+    z: 1531.5972900390625
+  U:
+    x: 185.30442810058594
+    y: 249.52198791503906
+    z: 1492.3629150390625
 
-pointR_pos:
-  x_ratio: 0.75
-  y_ratio: 0.95
-
-pointU_pos:
-  x_ratio: 0.621
-  y_ratio: 0.8
+depth_l: 1322.7680
+depth_r: 1541.9472
+depth_u: 1483.4409
 
 # 기타 설정
 point_radius: 25
@@ -35,10 +41,11 @@ depth_max: 2500.0
 
 
 pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
+enable_3d_matching: true
 
 # 3D RANSAC 파라미터
 ransac_3d:
-  max_correspondence_distance: 0.1  
+  max_correspondence_distance: 0.2
   ransac_n: 7                         
   max_iterations: 3000                
   confidence: 0.9999

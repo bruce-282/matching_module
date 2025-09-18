@@ -349,7 +349,7 @@ class Matcher:
         }
 
         # RANSAC 필터링 수행
-        start_time = time.time()
+
         filtered_pred = filter_matches(
             pred,
             ransac_method=ransac_method,
@@ -360,14 +360,11 @@ class Matcher:
         )
         # self.logger.debug(f"filtered_pred: {filtered_pred}")
         # logger.debug(f"pred: {pred}")
-        filter_time = time.time() - start_time
 
         if "mmkeypoints0_orig" in filtered_pred:
             filtered_kpts0 = filtered_pred["mmkeypoints0_orig"]
             filtered_kpts1 = filtered_pred["mmkeypoints1_orig"]
             filtered_conf = filtered_pred["mmconf"]
-
-        self.logger.info(f"RANSAC filtering completed! (time: {filter_time:.3f} seconds)")
         
         # 디버그 모드일 때만 상세 통계 계산 (효율성 개선)
         if self.logger.isEnabledFor(logging.DEBUG):
@@ -392,7 +389,6 @@ class Matcher:
                 "filtered_conf": filtered_conf,
                 "homography": H,
                 "geom_info": geom_info,
-                "filter_time": filter_time,
             }
         elif "Fundamental" in filtered_pred["geom_info"]:
             F = filtered_pred["geom_info"]["Fundamental"]
@@ -405,7 +401,6 @@ class Matcher:
                 "filtered_conf": filtered_conf,
                 "fundamental": F,
                 "geom_info": geom_info,
-                "filter_time": filter_time,
             }
         else:
             self.logger.warning("RANSAC filtering failed - not enough matches")
@@ -418,9 +413,9 @@ class Matcher:
         source_image: np.ndarray = None,
         plane_normal: np.ndarray = None,
         result3d: Tuple[np.ndarray, np.ndarray, np.ndarray] = None,
-        result_image_name: str = "",
         ransac_result: Optional[Dict[str, Any]] = None,
         camera: Camera = None,
+        result_image_name: str = "",
     ) -> None:
         """
         결과 시각화
@@ -442,23 +437,31 @@ class Matcher:
             self.logger.error("Source image not found")
             return
 
-        if ransac_result["homography"] is not None:
+        if ransac_result["homography"] and not self.config["enable_3d_matching"]:
 
-            warp_result = warp_images(
-                        target_image,
-                        source_image,
-                        ransac_result["homography"],
-                        pointL_pos=self.config["pointL_pos"],
-                        pointR_pos=self.config["pointR_pos"],
-                        pointU_pos=self.config["pointU_pos"],
-                        point_radius=self.config["point_radius"],
-            )
+            try:
+                warp_result = warp_images(
+                            target_image,
+                            source_image,
+                            ransac_result["homography"],
+                            pointL_pos=self.config["pointL_pos"],
+                            pointR_pos=self.config["pointR_pos"],
+                            pointU_pos=self.config["pointU_pos"],
+                            point_radius=self.config["point_radius"],
+                )
+                output_file = str(self.output_path / f"{result_image_name}_warped_overlapped.png")
+                cv2.imwrite(output_file, cv2.cvtColor(warp_result[0], cv2.COLOR_RGB2BGR))
+                self.logger.debug(f"warped image saved: {output_file}")
 
-            result1_3d, result2_3d, result3_3d = result3d
+            except Exception as e:
+                self.logger.error(f"image warping failed: {e}")
+                return
 
-            center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
+        result1_3d, result2_3d, result3_3d = result3d
+        center_point_3d = (result1_3d + result2_3d + result3_3d) / 3   
 
-            pcd = create_point_cloud_from_depth_image(
+
+        pcd = create_point_cloud_from_depth_image(
                         target_depth,  # depth 이미지
                         plane_normal,
                         center_point_3d,
@@ -469,33 +472,23 @@ class Matcher:
                         texture_image=(
                             target_texture if target_texture is not None else None
                         ),  # texture 이미지 (source 이미지 사용)
-            )
-            pcd.scale(1000.0, center=[0, 0, 0])
+        )
+        pcd.scale(1000.0, center=[0, 0, 0])
 
-            o3d.io.write_point_cloud(
-                str(self.output_path / f"{result_image_name}_with_normal.ply"), pcd,
-            )
-            self.logger.debug(
-                f"PLY file saved: {self.output_path / f'{result_image_name}_with_normal.ply'}"
-            )
-
-            if warp_result[0] is None: 
-                self.logger.warning("Image transformation failed")
-                return
-
-            output_file = str(
-                            self.output_path
-                            / f"{result_image_name}_warped_overlapped.png"
-            )
-            cv2.imwrite(output_file, cv2.cvtColor(warp_result[0], cv2.COLOR_RGB2BGR))
-            self.logger.debug(f"Transformed image saved: {output_file}")
-        else:
-            self.logger.error("Homography matrix not found in ransac_result")
+        pcd_path = str(self.output_path / f"{result_image_name}_with_anchor.ply")
+        o3d.io.write_point_cloud(
+           pcd_path, pcd,
+        )
+        self.logger.debug(
+            f"PLY file saved: {pcd_path}"
+        )
+ 
 
     def calculate_anchor_points(
         self,
         source_image_shape: Optional[Tuple[int, int]] = None,
         ransac_result: Dict[str, Any] = None,
+        transform_matrix: np.ndarray = None,
     ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """
         RANSAC 결과를 바탕으로 포인트 위치를 계산
@@ -518,13 +511,9 @@ class Matcher:
                 if "Homography" in ransac_result["geom_info"]:
                     H = np.array(ransac_result["geom_info"]["Homography"])
                     transform_matrix = np.linalg.inv(H)
-                elif "Fundamental" in ransac_result["geom_info"]:
-                    F = np.array(ransac_result["geom_info"]["Fundamental"])
-                    E = K2.T @ F @ K1
-   
-                    transform_matrix = np.linalg.inv(E)
                 else:
-                    self.logger.error("Homography or Fundamental matrix not found in ransac_result")
+                    self.logger.error("No valid transformation matrix found")
+                    return None
 
                 # 포인트 변환 계산
                 pointL_coords = np.array(
@@ -532,7 +521,7 @@ class Matcher:
                         [
                             w * self.config["pointL_pos"]["x_ratio"],
                             h * self.config["pointL_pos"]["y_ratio"],
-                            1,
+                            1 ,
                         ]
                     ],
                     dtype=np.float32,
@@ -623,7 +612,7 @@ class Matcher:
             z3 = find_depth_from_2d_robust(
                 target_depth_origin, (point3_2d[0], point3_2d[1]), radius
             )
-
+            
             # z값만 반환
             if z1 is not None and z2 is not None and z3 is not None:
                 return z1, z2, z3
@@ -679,7 +668,7 @@ class Matcher:
         target_texture_path,
     ):
         """실패한 매칭 결과를 시각화하여 저장"""
-
+            
         base_name = Path(target_texture_path).stem
         visualize_matches(
             target_clipped,
@@ -709,7 +698,7 @@ class Matcher:
         fy = intrinsic[1, 1]
         cx = intrinsic[0, 2]
         cy = intrinsic[1, 2]
-
+        
         z = point[2]
         x = (point[0] - cx) * z / fx
         y = (point[1] - cy) * z / fy
@@ -807,56 +796,79 @@ class Matcher:
                     confidence_threshold=self.config["confidence_threshold"],
                 )
             
-            time_start = time.time()
-            if 1: #self.config["geometry_type"] == "Fundamental":
+
+            if self.config["enable_3d_matching"]: 
+                time_start = time.time()
                 source_depth = source_image  # 원본 depth 이미지 사용 (RGB 변환 전)
-                filtered_matches = self.run_matching_3d(filtered_matches, target_depth, source_depth)
-            time_end = time.time()
-            self.logger.info(f"3D matching time: {time_end - time_start:.3f} seconds")
-            if filtered_matches is None:
-                return None, None, None, None
+                result = self.run_matching_3d(filtered_matches, target_depth, source_depth)
+                time_end = time.time()
+                self.logger.info(f"3D matching time: {time_end - time_start:.3f} seconds")
+                if filtered_matches is None:
+                    return None, None, None, None
 
-            result_points_2d = self.calculate_anchor_points(
-                source_image_shape=source_image.shape[:2],
-                ransac_result=filtered_matches,
-            )
-            if result_points_2d is None:
-                self.logger.error("2D points calculation failed")
-                return None, None, None, None
+                selected_points = self.config.get("selected_points", {})
+                result1_3d = np.array([selected_points["L"]["x"], selected_points["L"]["y"], selected_points["L"]["z"]])
+                result2_3d = np.array([selected_points["R"]["x"], selected_points["R"]["y"], selected_points["R"]["z"]])
+                result3_3d = np.array([selected_points["U"]["x"], selected_points["U"]["y"], selected_points["U"]["z"]])
 
-            result1_2d, result2_2d, result3_2d = result_points_2d
-            # Depth 계산
-            depth_result = self.calculate_anchor_depth(
-                target_depth_path,
-                target_depth,
-                result1_2d,
-                result2_2d,
-                result3_2d,
-                radius=self.config["point_radius"],
-            )
+                transform_matrix = result["transformation"]
+                
+                # 3D 포인트를 homogeneous coordinate로 변환 (4x1) 후 변환 적용
+                def apply_transform_3d(point_3d, transform_4x4):
 
-            if depth_result is None:
-                self._save_failed_matches(
-                    target_clipped,
-                    source_image,
-                    matches,
-                    filtered_matches,
-                    self.output_path,
-                    target_texture_path,
+                    point_homo = np.append(point_3d, 1.0)
+                    transformed_homo = transform_4x4 @ point_homo
+                    return transformed_homo[:3]
+                
+                result1_3d = apply_transform_3d(result1_3d, transform_matrix)
+                result2_3d = apply_transform_3d(result2_3d, transform_matrix)
+                result3_3d = apply_transform_3d(result3_3d, transform_matrix)
+      
+            else:
+                time_start = time.time()
+                result_points_2d = self.calculate_anchor_points(
+                    source_image_shape=source_image.shape[:2],
+                    ransac_result=filtered_matches,
                 )
-                self.logger.error("Depth 계산에 실패했습니다.")
-                return None, None, None, None
+                if result_points_2d is None:
+                    self.logger.error("2D points calculation failed")
+                    return None, None, None, None
+                
+                result1_2d, result2_2d, result3_2d = result_points_2d
+                # Depth 계산
+                depth_result = self.calculate_anchor_depth(
+                    target_depth_path,
+                    target_depth,
+                    result1_2d,
+                    result2_2d,
+                    result3_2d,
+                    radius=self.config["point_radius"],
+                )
 
-            z1, z2, z3 = depth_result
-            self.logger.debug(
-                f"Depth information: pointL: {z1:.1f}mm, pointR: {z2:.1f}mm, pointU: {z3:.1f}mm"
-            )
+                if depth_result is None:
+                    self._save_failed_matches(
+                        target_clipped,
+                        source_image,
+                        matches,
+                        filtered_matches,
+                        self.output_path,
+                        target_texture_path,
+                    )
+                    self.logger.error("Depth 계산에 실패했습니다.")
+                    return None, None, None, None
 
-            result1_3d, result2_3d, result3_3d = self.calculate_3d_points(
-                np.array([result1_2d[0], result1_2d[1], z1]),   
-                np.array([result2_2d[0], result2_2d[1], z2]), 
-                np.array([result3_2d[0], result3_2d[1], z3])
-            )
+                z1, z2, z3 = depth_result
+         
+
+                result1_3d, result2_3d, result3_3d = self.calculate_3d_points(
+                    np.array([result1_2d[0], result1_2d[1], z1]),   
+                    np.array([result2_2d[0], result2_2d[1], z2]), 
+                    np.array([result3_2d[0], result3_2d[1], z3])
+                )
+                time_end = time.time()
+                self.logger.info(f"3D points calculation time: {time_end - time_start:.3f} seconds")
+
+
             self.logger.debug(
                 f"3D points: pointL: {result1_3d}, pointR: {result2_3d}, pointU: {result3_3d}"
             )
@@ -868,15 +880,12 @@ class Matcher:
             # 4. 결과 시각화
             if self.config["debug_mode"]:
                 save_points_to_yaml(
-                    Path(target_depth_path),
                     target_depth.shape[:2],
-                    result1_2d,
-                    result2_2d,
-                    result3_2d,
                     result1_3d,
                     result2_3d,
                     result3_3d,
                     plane_normal,
+                    self.target_texture_name,
                     self.output_path,
                 )
                 self.logger.info("Points information is saved to YAML file.")
@@ -887,19 +896,13 @@ class Matcher:
                     source_image=source_image,
                     plane_normal=plane_normal,
                     result3d=(result1_3d, result2_3d, result3_3d),
-                    result_image_name=(self.target_texture_name),
                     ransac_result=filtered_matches,
                     camera=self.camera,
+                    result_image_name=self.target_texture_name,
                 )
 
-            # 전체 시간 요약
-            total_time = self.matching_time
-            if filtered_matches:
-                total_time += filtered_matches.get("filter_time", 0.0)
 
             self.logger.info("\n=== Pipeline completed ===")
-
-            self.logger.info(f"Total matching time: {total_time:.3f} seconds")
 
             return result1_3d, result2_3d, result3_3d, plane_normal
 
@@ -1231,12 +1234,13 @@ class Matcher:
             return {
                 # "fundamental_matrix": F,
                 # "essential_matrix": E,
-                "points_3d_target": points_3d_target,
+                #"points_3d_target": points_3d_target,
+
                 #"points_3d_source": points_3d_source,
                 #"gicp_result": result,
                 #"fitness": result.fitness,
-                "rmse": result.inlier_rmse,
-                "transformation": result.transformation
+                #"rmse": result.inlier_rmse,
+                "transformation": pose
             }
             
         except Exception as e:

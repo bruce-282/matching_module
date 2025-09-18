@@ -104,6 +104,8 @@ def main():
     cv2.circle(img_padded, adjusted_points[1], point_radius, (0, 255, 0), -1)  # 초록색
     cv2.circle(img_padded, adjusted_points[2], point_radius, (0, 0, 255), -1)  # 빨간색
     
+
+    
     # 출력 디렉토리 생성
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True)
@@ -112,6 +114,23 @@ def main():
     source_name = Path(source_image_path).stem
     output_file = output_path / f"{source_name}_with_points.png"
     
+    # 포인트 위치의 depth 값 출력
+    print(f"포인트 위치의 depth 값:")
+    for i, (point_name, color_name) in enumerate([("L", "파란색"), ("R", "초록색"), ("U", "빨간색")]):
+        # 원본 이미지에서의 좌표 (패딩 제거)
+        orig_x = adjusted_points[i][0] - pad_left
+        orig_y = adjusted_points[i][1] - pad_top
+        
+        # 이미지 범위 체크
+        if 0 <= orig_x < w and 0 <= orig_y < h:
+            if len(img.shape) == 3:  # 컬러 이미지인 경우
+                depth_value = img[orig_y, orig_x, 0]  # 첫 번째 채널 사용
+            else:  # 그레이스케일 이미지인 경우
+                depth_value = img[orig_y, orig_x]
+            print(f"  {point_name} ({color_name}): 위치 {adjusted_points[i]} -> 원본 위치 ({orig_x}, {orig_y}) -> depth 값: {depth_value}")
+        else:
+            print(f"  {point_name} ({color_name}): 위치 {adjusted_points[i]} -> 원본 위치 ({orig_x}, {orig_y}) -> 범위 초과")
+
     # 이미지 저장
     try:
         cv2.imwrite(str(output_file), img_padded)

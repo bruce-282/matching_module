@@ -212,15 +212,12 @@ def create_camera_from_yaml_config(config: Dict[str, Any]):
 
 
 def save_points_to_yaml(
-    image_path: Path,
     image_size: Tuple[int, int],
-    point1_2d: Optional[np.ndarray],
-    point2_2d: Optional[np.ndarray],
-    point3_2d: Optional[np.ndarray],
     point1_3d: Optional[np.ndarray] = None,
     point2_3d: Optional[np.ndarray] = None,
     point3_3d: Optional[np.ndarray] = None,
     plane_normal: Optional[np.ndarray] = None,
+    image_name: Optional[str] = None,
     output_path: Optional[Path] = None,
 ) -> None:
     """
@@ -229,34 +226,21 @@ def save_points_to_yaml(
     Args:
         image_path: 소스 이미지 경로
         image_size: 이미지 크기 (height, width)
-        point1_2d: Point L의 2D 좌표
-        point2_2d: Point R의 2D 좌표
-        point3_2d: Point U의 2D 좌표
         point1_3d: Point L의 3D 좌표 (선택사항)
         point2_3d: Point R의 3D 좌표 (선택사항)
         point3_3d: Point U의 3D 좌표 (선택사항)
         plane_normal: 평면 법선 벡터 (선택사항)
         output_path: 출력 디렉토리 경로 (선택사항)
     """
-    # source 이미지 이름으로 yaml 파일 생성
-    yaml_filename = f"{image_path.stem}_result.yaml"
 
-    if output_path is not None:
-        yaml_path = output_path / yaml_filename
-    else:
-        yaml_path = image_path.parent / yaml_filename
+
 
     # YAML 데이터 구조
     points_data = {
-        "source_image": image_path.name,
+        "source_image": image_name,
         "image_size": {
             "width": int(image_size[1]),
             "height": int(image_size[0]),
-        },
-        "transformed_points_2d": {
-            "pointL": {"x": int(point1_2d[0]), "y": int(point1_2d[1])},
-            "pointR": {"x": int(point2_2d[0]), "y": int(point2_2d[1])},
-            "pointU": {"x": int(point3_2d[0]), "y": int(point3_2d[1])},
         },
     }
 
@@ -284,6 +268,9 @@ def save_points_to_yaml(
                 "z": float(plane_normal[2] if plane_normal is not None else 0),
             },
         }
+
+    # source 이미지 이름으로 yaml 파일 생성
+    yaml_path = output_path / f"{image_name}_result.yaml"
 
     with open(yaml_path, "w", encoding="utf-8") as f:
         yaml.dump(

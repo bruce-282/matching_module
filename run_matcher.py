@@ -9,6 +9,7 @@ import argparse
 import warnings
 import logging
 import yaml
+import time
 
 # torchvision 경고 숨기기
 warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
@@ -101,7 +102,7 @@ def main():
             logger.info(f"     target_depth shape/dtype: {target_depth.shape, target_depth.dtype}")
             logger.info(f"     source_image shape/dtype: {source_image.shape, source_image.dtype}")
          
-
+            time_start = time.time()
             result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(
                 target_texture=target_texture,
                 target_depth=target_depth,
@@ -110,6 +111,8 @@ def main():
                 target_depth_path=depth_file,
                 output_dir=output_dir,
             )
+            time_end = time.time()
+            logger.info(f"Total matching time: {time_end - time_start:.3f} seconds")
         except Exception as e:
             logger.error(f"{base_name} - {e}")
             continue
