@@ -3,12 +3,10 @@
 """
 
 from pathlib import Path
-from re import escape
 import torch
 from PIL import Image
 import numpy as np
 import cv2
-import os
 import logging
 
 from core.utils.logger_utils import get_logger
@@ -121,21 +119,6 @@ def load_image(image_path):
     image_tensor = torch.from_numpy(image_np).permute(2, 0, 1).float() / 255.0
 
     return image_tensor
-
-
-# def resize_image(image, target_size):
-#     """이미지를 지정된 크기로 리사이즈합니다."""
-#     if isinstance(image, torch.Tensor):
-#         # PyTorch 텐서인 경우 PIL로 변환 후 리사이즈
-#         image_np = image.permute(1, 2, 0).numpy()
-#         image_pil = Image.fromarray((image_np * 255).astype(np.uint8))
-#         resized_pil = image_pil.resize(target_size, Image.Resampling.LANCZOS)
-#         resized_np = np.array(resized_pil)
-#         return torch.from_numpy(resized_np).permute(2, 0, 1).float() / 255.0
-#     else:
-#         # PIL 이미지인 경우
-#         resized = image.resize(target_size, Image.Resampling.LANCZOS)
-#         return resized
 
 
 def resize_image(image, size, interp="cv2_area"):

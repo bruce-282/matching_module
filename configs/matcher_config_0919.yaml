@@ -1,6 +1,6 @@
 source_image_path: "datasets/source_0919.tif"
-input_dir: "datasets/0919/"
-output_dir: "output0919"
+input_dir: "datasets/0910/"
+output_dir: "output0910"
 
 max_keypoints: 5000  
 
@@ -11,32 +11,27 @@ ransac_max_iter: 30000
 ransac_confidence: 0.9999
 debug_mode: true
 
-# 포인트 위치 설정 
 selected_points:
   L:
-    x: 15.694034576416016
-    y: 334.7763671875
-    z: 1338.4677734375
+    x: -28.02078685152369
+    y: 322.8911333002952
+    z: 1312.000036239624
   R:
-    x: 350.3045349121094
-    y: 428.72760009765625
-    z: 1531.5972900390625
+    x: 402.44106120018216
+    y: 439.71793461742914
+    z: 1562.000036239624
   U:
-    x: 185.30442810058594
-    y: 249.52198791503906
-    z: 1492.3629150390625
+    x: 184.56082806030466
+    y: 261.9381813145888
+    z: 1486.9999885559082
 
-depth_l: 1322.7680
-depth_r: 1541.9472
-depth_u: 1483.4409
 
-# 기타 설정
 point_radius: 25
 depth_max: 2500.0
 
 
-pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
 enable_3d_matching: true
+pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
 
 # 3D RANSAC 파라미터
 ransac_3d:

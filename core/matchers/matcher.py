@@ -647,7 +647,7 @@ class Matcher:
             colors = np.asarray(pcd.colors) if pcd.has_colors() else None
 
             # 포인트 클라우드를 depth map으로 변환
-            depth_image, intrinsic = point_cloud_to_depth_map(points, colors)
+            depth_image = point_cloud_to_depth_map(points, self.camera)
 
             if depth_image is None:
                 self.logger.error("Depth map creation failed")

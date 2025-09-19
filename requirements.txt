@@ -24,5 +24,7 @@ open3d
 # Utilities
 matplotlib<3.9
 seaborn
+tifffile
+PIL
 
 huggingface_hub
