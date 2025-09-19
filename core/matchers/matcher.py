@@ -96,6 +96,7 @@ class Matcher:
 
             # 3D 매칭 설정
             "pose_estimation_method": "ransac",
+            "save_essential": "2d",
         }
         if config.get("debug_mode", False):
             self.logger = setup_logger(__name__, logging.DEBUG)
@@ -436,7 +437,7 @@ class Matcher:
             self.logger.error("Source image not found")
             return
 
-        if ransac_result["homography"] and not self.config["enable_3d_matching"]:
+        if ransac_result["homography"] and not self.config["enable_3d_matching"] and (self.config["save_essential"] == "all" or self.config["save_essential"] == "2d"):
             
             try:
                 warp_result = warp_images(
@@ -460,44 +461,44 @@ class Matcher:
         result1_3d, result2_3d, result3_3d = result3d
         center_point_3d = (result1_3d + result2_3d + result3_3d) / 3   
 
-
-        pcd = create_point_cloud_from_depth_image(
-                        target_depth,  # depth 이미지
-                        plane_normal,
-                        center_point_3d,
-                        camera.get_intrinsic_matrix(),
-                        result1_3d,
-                        result2_3d,
-                        result3_3d,
-                        texture_image=(
-                            target_texture if target_texture is not None else None
-                        ),  # texture 이미지 (source 이미지 사용)
-        )
-        pcd.scale(1000.0, center=[0, 0, 0])
-
-        pcd_path = str(self.output_path / f"{result_image_name}_with_anchor.ply")
-        o3d.io.write_point_cloud(
-           pcd_path, pcd,
-        )
-        self.logger.debug(
-            f"PLY file saved: {pcd_path}"
-        )
-        
-        # Project PCD to 2D images
-        try:
-            color_image = project_pcd_to_images(
-                pcd=pcd,
-                intrinsic_matrix=camera.get_intrinsic_matrix(),
-                image_size=(target_image.shape[1], target_image.shape[0])  # (width, height)
+        if self.config["save_essential"] == "all" or self.config["save_essential"] == "3d":
+            pcd = create_point_cloud_from_depth_image(
+                            target_depth,  # depth 이미지
+                            plane_normal,
+                            center_point_3d,
+                            camera.get_intrinsic_matrix(),
+                            result1_3d,
+                            result2_3d,
+                            result3_3d,
+                            texture_image=(
+                                target_texture if target_texture is not None else None
+                            ),  # texture 이미지 (source 이미지 사용)
             )
-            
-            # Save color projection
-            color_path = str(self.output_path / f"{result_image_name}_with_anchor.png")
-            cv2.imwrite(color_path, cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR))
-            self.logger.debug(f"PCD color projection saved: {color_path}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to project PCD to 2D: {e}")
+            pcd.scale(1000.0, center=[0, 0, 0])
+
+            pcd_path = str(self.output_path / f"{result_image_name}_with_anchor.ply")
+            o3d.io.write_point_cloud(
+            pcd_path, pcd,
+            )
+            self.logger.debug(
+                f"PLY file saved: {pcd_path}"
+            )
+        if self.config["save_essential"] == "all" or self.config["save_essential"] == "2d":
+            # Project PCD to 2D images
+            try:
+                color_image = project_pcd_to_images(
+                    pcd=pcd,
+                    intrinsic_matrix=camera.get_intrinsic_matrix(),
+                    image_size=(target_image.shape[1], target_image.shape[0])  # (width, height)
+                )
+                
+                # Save color projection
+                color_path = str(self.output_path / f"{result_image_name}_with_anchor.png")
+                cv2.imwrite(color_path, cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR))
+                self.logger.debug(f"PCD color projection saved: {color_path}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to project PCD to 2D: {e}")
  
 
     def calculate_anchor_points(
@@ -759,7 +760,8 @@ class Matcher:
         self.target_texture_name = Path(target_texture_path).stem
         self.target_depth_name = Path(target_depth_path).stem
         self.output_path = Path(output_dir)
-        self.output_path.mkdir(exist_ok=True)
+        if self.config["save_essential"] != "none":
+            self.output_path.mkdir(exist_ok=True)
 
         try:
             if self.config["image_undistortion"]:
@@ -784,7 +786,12 @@ class Matcher:
             matches = self.run_matching(target_clipped, source_image)
             time_end = time.time()
             self.logger.info(f"Matching time: {time_end - time_start:.3f} seconds")
-            if self.config["debug_mode"] and matches is not None:
+
+            if matches is None:
+                self.logger.error("2D matching failed")
+                raise Exception("2D matching failed")
+
+            if self.config["save_essential"] == "all" or self.config["save_essential"] == "2d":
                 visualize_matches(
                     target_clipped,
                     source_image,
@@ -798,7 +805,12 @@ class Matcher:
             filtered_matches = self.run_ransac_filtering(matches)
             time_end = time.time()
             self.logger.info(f"RANSAC filtering time: {time_end - time_start:.3f} seconds")
-            if self.config["debug_mode"] and filtered_matches is not None:
+
+            if filtered_matches is None:
+                self.logger.error("2D filtering failed")
+                raise Exception("2D filtering failed")
+
+            if self.config["save_essential"] == "all" or self.config["save_essential"] == "2d":
                 visualize_matches(
                     target_clipped,
                     source_image,
@@ -820,7 +832,8 @@ class Matcher:
                 time_end = time.time()
                 self.logger.info(f"3D matching time: {time_end - time_start:.3f} seconds")
                 if filtered_matches is None:
-                    return None, None, None, None
+                    self.logger.error("3D matching failed")        
+                    raise Exception("3D matching failed")
 
                 selected_points = self.config.get("selected_points", {})
                 result1_3d = np.array([selected_points["L"]["x"], selected_points["L"]["y"], selected_points["L"]["z"]])
@@ -848,7 +861,7 @@ class Matcher:
                 )
                 if result_points_2d is None:
                     self.logger.error("2D points calculation failed")
-                    return None, None, None, None
+                    raise Exception("2D points calculation failed")
                 
                 result1_2d, result2_2d, result3_2d = result_points_2d
                 # Depth 계산
@@ -870,8 +883,8 @@ class Matcher:
                         self.output_path,
                         target_texture_path,
                     )
-                    self.logger.error("Depth 계산에 실패했습니다.")
-                    return None, None, None, None
+                    self.logger.error("Depth calculation failed")
+                    raise Exception("Depth calculation failed")
 
                 z1, z2, z3 = depth_result
          
@@ -894,7 +907,7 @@ class Matcher:
             self.logger.debug(f"Plane normal: {plane_normal}")
 
             # 4. 결과 시각화
-            if self.config["debug_mode"]:
+            if self.config["save_essential"] != "none":
                 
                 result_3d_points = (result1_3d, result2_3d, result3_3d) 
                 
@@ -930,10 +943,7 @@ class Matcher:
 
         except Exception as e:
             self.logger.error(f"Error occurred: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return None, None, None, None
+            raise Exception(f"{e}")
 
     def calculate_3d_points(self, result1_3d: np.ndarray, result2_3d: np.ndarray, result3_3d: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
