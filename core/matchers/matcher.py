@@ -1157,25 +1157,25 @@ class Matcher:
 
             #combined_pcd = pcd0 + pcd1_transformed
             
-            # 저장
-            output_path = Path(self.config.get("output_dir", "output"))
-            output_path.mkdir(exist_ok=True)
+            # # 저장
+            # output_path = Path(self.config.get("output_dir", "output"))
+            # output_path.mkdir(exist_ok=True)
             
-            # 파일명 생성
-            pcd_filename_transformed = f"{self.target_texture_name}_pcd_before_icp_transformed_source.ply"
-            pcd_filename_target = f"{self.target_texture_name}_pcd_before_icp_target.ply"
-            pcd_filename_source = f"{self.target_texture_name}_pcd_before_icp_source.ply"
-            pcd_path_transformed = output_path / pcd_filename_transformed
-            pcd_path_target = output_path / pcd_filename_target
-            pcd_path_source = output_path / pcd_filename_source
+            # # 파일명 생성
+            # pcd_filename_transformed = f"{self.target_texture_name}_pcd_before_icp_transformed_source.ply"
+            # pcd_filename_target = f"{self.target_texture_name}_pcd_before_icp_target.ply"
+            # pcd_filename_source = f"{self.target_texture_name}_pcd_before_icp_source.ply"
+            # pcd_path_transformed = output_path / pcd_filename_transformed
+            # pcd_path_target = output_path / pcd_filename_target
+            # pcd_path_source = output_path / pcd_filename_source
 
-            # Before ICP 저장 (원본 상태)
-            o3d.io.write_point_cloud(str(pcd_path_transformed), pcd_source_transformed.paint_uniform_color([0, 0, 1]))
-            self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_transformed}")
-            o3d.io.write_point_cloud(str(pcd_path_target), pcd_target.paint_uniform_color([1, 0, 0]))
-            self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_target}")
-            o3d.io.write_point_cloud(str(pcd_path_source), pcd_source.paint_uniform_color([0, 1, 0]))
-            self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_source}")
+            # # Before ICP 저장 (원본 상태)
+            # o3d.io.write_point_cloud(str(pcd_path_transformed), pcd_source_transformed.paint_uniform_color([0, 0, 1]))
+            # self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_transformed}")
+            # o3d.io.write_point_cloud(str(pcd_path_target), pcd_target.paint_uniform_color([1, 0, 0]))
+            # self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_target}")
+            # o3d.io.write_point_cloud(str(pcd_path_source), pcd_source.paint_uniform_color([0, 1, 0]))
+            # self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_source}")
             
             # # 아웃라이어 제거 (ICP 전 전처리)
             # statistical_nb_neighbors = 20
