@@ -2,7 +2,7 @@
 # 와이드 이미지용 특화 설정
 
 # 이미지 경로 설정
-source_image_path: "datasets/6_IMG_DepthMap_undistorted_clipped.tif"
+source_image_path: "datasets/source_0919.tif"
 input_dir: "datasets/0910/"
 output_dir: "output0910"
 
