@@ -28,6 +28,19 @@ from .depth_utils import (
     depth_estimation_mad,
     depth_estimation_histogram,
 )
+from .geometry_utils import (
+    se3_to_homography,
+    homography_to_se3,
+    decompose_homography,
+    apply_homography,
+    compute_homography_from_correspondences,
+    validate_homography,
+    normalize_points,
+    robust_homography_estimation,
+    project_pcd_to_image,
+    project_pcd_to_depth_image,
+    project_pcd_to_images,
+)
 
 __all__ = [
     "load_image",
@@ -54,6 +67,17 @@ __all__ = [
     "depth_estimation_histogram",
     "registration_ransac_based_on_correspondence",
     "solve_rigid_transform_between_points",
+    "se3_to_homography",
+    "homography_to_se3",
+    "decompose_homography",
+    "apply_homography",
+    "compute_homography_from_correspondences",
+    "validate_homography",
+    "normalize_points",
+    "robust_homography_estimation",
+    "project_pcd_to_image",
+    "project_pcd_to_depth_image",
+    "project_pcd_to_images",
 ]
 
 MODEL_REPO_ID = "Realcat/imcui_checkpoints"

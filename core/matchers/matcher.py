@@ -14,6 +14,7 @@ import warnings
 import logging
 import open3d as o3d
 import copy
+import cv2
 from typing import Dict, List, Optional, Tuple, Any
 
 # torchvision 경고 숨기기
@@ -37,6 +38,7 @@ from ..utils.depth_utils import (
     point_cloud_to_depth_map,
     find_depth_from_2d_robust,
 )
+from ..utils.geometry_utils import project_pcd_to_images
 
 
 
@@ -435,7 +437,7 @@ class Matcher:
             return
 
         if ransac_result["homography"] and not self.config["enable_3d_matching"]:
-
+            
             try:
                 warp_result = warp_images(
                             target_image,
@@ -453,6 +455,7 @@ class Matcher:
             except Exception as e:
                 self.logger.error(f"image warping failed: {e}")
                 return
+                
 
         result1_3d, result2_3d, result3_3d = result3d
         center_point_3d = (result1_3d + result2_3d + result3_3d) / 3   
@@ -479,6 +482,22 @@ class Matcher:
         self.logger.debug(
             f"PLY file saved: {pcd_path}"
         )
+        
+        # Project PCD to 2D images
+        try:
+            color_image = project_pcd_to_images(
+                pcd=pcd,
+                intrinsic_matrix=camera.get_intrinsic_matrix(),
+                image_size=(target_image.shape[1], target_image.shape[0])  # (width, height)
+            )
+            
+            # Save color projection
+            color_path = str(self.output_path / f"{result_image_name}_with_anchor.png")
+            cv2.imwrite(color_path, cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR))
+            self.logger.debug(f"PCD color projection saved: {color_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to project PCD to 2D: {e}")
  
 
     def calculate_anchor_points(
