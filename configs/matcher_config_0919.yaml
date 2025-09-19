@@ -32,6 +32,8 @@ depth_max: 2500.0
 
 enable_3d_matching: true
 
+stable_depth_range: 50.0 # +-50.0mm
+
 pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
 
 # 3D RANSAC 파라미터

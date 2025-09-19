@@ -317,6 +317,27 @@ def robust_homography_estimation(points1: np.ndarray,
     return best_H, best_inlier_mask
 
 
+def project_3d_point_to_2d(point_3d: np.ndarray, 
+                          intrinsic_matrix: np.ndarray) -> np.ndarray:
+    """
+    Project single 3D point to 2D image coordinates.
+    
+    Args:
+        point_3d: 3D point [x, y, z]
+        intrinsic_matrix: 3x3 camera intrinsic matrix
+        
+    Returns:
+        2D point [u, v]
+    """
+    fx, fy = intrinsic_matrix[0, 0], intrinsic_matrix[1, 1]
+    cx, cy = intrinsic_matrix[0, 2], intrinsic_matrix[1, 2]
+    
+    u = fx * point_3d[0] / point_3d[2] + cx
+    v = fy * point_3d[1] / point_3d[2] + cy
+    
+    return np.array([u, v])
+
+
 def project_pcd_to_image(points_3d: np.ndarray, 
                         colors: Optional[np.ndarray] = None,
                         intrinsic_matrix: np.ndarray = None,

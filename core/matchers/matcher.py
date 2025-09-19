@@ -38,7 +38,7 @@ from ..utils.depth_utils import (
     point_cloud_to_depth_map,
     find_depth_from_2d_robust,
 )
-from ..utils.geometry_utils import project_pcd_to_images
+from ..utils.geometry_utils import project_pcd_to_images, project_3d_point_to_2d
 
 
 
@@ -78,6 +78,7 @@ class Matcher:
             "force_resize": False,
      
             "debug_mode": False,
+            "save_essential": "2d",
             # 이미지 변환 포인트 설정
             "pointL_pos": {
                 "x_ratio": 0.5,
@@ -96,7 +97,7 @@ class Matcher:
 
             # 3D 매칭 설정
             "pose_estimation_method": "ransac",
-            "save_essential": "2d",
+            "stable_depth_range": 50.0,
         }
         if config.get("debug_mode", False):
             self.logger = setup_logger(__name__, logging.DEBUG)
@@ -594,7 +595,7 @@ class Matcher:
     def calculate_anchor_depth(
         self,
         target_depth_path: str,
-        target_depth_origin: np.ndarray,
+        target_depth: np.ndarray,
         point1_2d: np.ndarray,
         point2_2d: np.ndarray,
         point3_2d: np.ndarray,
@@ -617,17 +618,17 @@ class Matcher:
         # PLY 파일이 아닌 경우 depth map 처리
         if not is_ply_file(target_depth_path):
             # depth_image가 3차원인 경우 첫 번째 채널만 사용
-            if len(target_depth_origin.shape) == 3:
-                target_depth_origin = target_depth_origin[:, :, 0]
+            if len(target_depth.shape) == 3:
+                target_depth = target_depth[:, :, 0]
 
             z1 = find_depth_from_2d_robust(
-                target_depth_origin, (point1_2d[0], point1_2d[1]), radius
+                target_depth, (int(point1_2d[0]), int(point1_2d[1])), radius
             )
             z2 = find_depth_from_2d_robust(
-                target_depth_origin, (point2_2d[0], point2_2d[1]), radius
+                target_depth, (int(point2_2d[0]), int(point2_2d[1])), radius
             )
             z3 = find_depth_from_2d_robust(
-                target_depth_origin, (point3_2d[0], point3_2d[1]), radius
+                target_depth, (int(point3_2d[0]), int(point3_2d[1])), radius
             )
             
             # z값만 반환
@@ -852,6 +853,32 @@ class Matcher:
                 result1_3d = apply_transform_3d(result1_3d, transform_matrix)
                 result2_3d = apply_transform_3d(result2_3d, transform_matrix)
                 result3_3d = apply_transform_3d(result3_3d, transform_matrix)
+
+                # Project 3D points to 2D and convert to integer coordinates
+                point1_2d = project_3d_point_to_2d(result1_3d, self.camera.get_intrinsic_matrix()).astype(int)
+                point2_2d = project_3d_point_to_2d(result2_3d, self.camera.get_intrinsic_matrix()).astype(int)
+                point3_2d = project_3d_point_to_2d(result3_3d, self.camera.get_intrinsic_matrix()).astype(int)
+                
+                z_depthmap = self.calculate_anchor_depth(
+                    target_depth_path=target_depth_path,
+                    target_depth=target_depth,
+                    point1_2d=point1_2d,
+                    point2_2d=point2_2d,
+                    point3_2d=point3_2d,
+                    radius=self.config["point_radius"],
+                )
+                if z_depthmap is None:
+                    raise Exception("Depth calculation failed") 
+                # Check depth stability for all points
+                points_3d = [result1_3d, result2_3d, result3_3d]
+                point_names = ["pointL", "pointR", "pointU"]
+                
+                for point_3d, depth, name in zip(points_3d, z_depthmap, point_names):
+                    depth_diff = abs(point_3d[2] - depth)
+                    if depth_diff > self.config["stable_depth_range"]:
+                        self.logger.warning(f"Out of stable depth range {name}: depth difference {depth_diff:.1f}mm > {self.config['stable_depth_range']}mm")
+                        return None, None, None, None
+                    self.logger.debug(f"Stable depth range {name}: depth difference {depth_diff:.1f}mm <= {self.config['stable_depth_range']}mm")
       
             else:
                 time_start = time.time()
@@ -860,17 +887,16 @@ class Matcher:
                     ransac_result=filtered_matches,
                 )
                 if result_points_2d is None:
-                    self.logger.error("2D points calculation failed")
                     raise Exception("2D points calculation failed")
                 
                 result1_2d, result2_2d, result3_2d = result_points_2d
                 # Depth 계산
                 depth_result = self.calculate_anchor_depth(
-                    target_depth_path,
-                    target_depth,
-                    result1_2d,
-                    result2_2d,
-                    result3_2d,
+                    target_depth_path=target_depth_path,
+                    target_depth=target_depth,
+                    point1_2d=result1_2d,
+                    point2_2d=result2_2d,
+                    point3_2d=result3_2d,
                     radius=self.config["point_radius"],
                 )
 
@@ -883,7 +909,6 @@ class Matcher:
                         self.output_path,
                         target_texture_path,
                     )
-                    self.logger.error("Depth calculation failed")
                     raise Exception("Depth calculation failed")
 
                 z1, z2, z3 = depth_result
@@ -942,7 +967,6 @@ class Matcher:
             return result1_3d, result2_3d, result3_3d, plane_normal
 
         except Exception as e:
-            self.logger.error(f"Error occurred: {e}")
             raise Exception(f"{e}")
 
     def calculate_3d_points(self, result1_3d: np.ndarray, result2_3d: np.ndarray, result3_3d: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:

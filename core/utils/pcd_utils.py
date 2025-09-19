@@ -465,7 +465,6 @@ def add_3d_points_to_pcd(
     pcd,
     points_3d: List[np.ndarray],
     point_color: List[float] = [1, 0, 0],  
-    point_size: int = 80,
 ):
     """
     3D points to PCD with red points
