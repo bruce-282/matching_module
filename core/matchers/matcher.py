@@ -20,13 +20,12 @@ from typing import Dict, List, Optional, Tuple, Any
 # torchvision 경고 숨기기
 warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
 
-# 로거 설정
-from core.utils.logger_utils import setup_logger
-
 # 프로젝트 루트를 Python 경로에 추가
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+# 로거 설정
+from core.utils.logger_utils import setup_logger
 from .models.roma import Roma
 from ..utils.image_utils import resize_image, process_depth_map
 from ..utils.viz_utils import visualize_matches, warp_images
