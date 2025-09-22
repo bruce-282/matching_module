@@ -955,7 +955,10 @@ class Matcher:
                     radius=self.config["point_radius"],
                 )
                 if z_depthmap is None:
-                    raise Exception("Depth calculation failed")
+                    self.logger.warning(
+                        f"Out of stable depth range: calculate anchor depth failed"
+                    )
+                    return None, None, None, None
                 # Check depth stability for all points
                 points_3d = [result1_3d, result2_3d, result3_3d]
                 point_names = ["pointL", "pointR", "pointU"]
