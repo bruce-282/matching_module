@@ -806,6 +806,11 @@ class Matcher:
         if self.config["save_essential"] != "none":
             self.output_path.mkdir(exist_ok=True)
 
+        result1_3d = None
+        result2_3d = None
+        result3_3d = None
+        plane_normal = None
+
         try:
             if self.config["image_undistortion"]:
                 target_depth = self.camera.undistort_image(target_depth)
