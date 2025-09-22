@@ -893,6 +893,9 @@ class Matcher:
                     raise Exception("3D matching failed")
 
                 selected_points = self.config.get("selected_points", {})
+                if selected_points is None:
+                    raise Exception("Selected points are not set")
+
                 result1_3d = np.array(
                     [
                         selected_points["L"]["x"],
