@@ -10,6 +10,7 @@ import cv2
 import logging
 
 from .logger_utils import get_logger
+
 logger = get_logger(__name__)
 
 logging.getLogger("PIL").setLevel(logging.WARNING)
@@ -35,7 +36,7 @@ def process_depth_map(
 
     # Depth max 값보다 큰 값은 texture 값으로 대체
     if texture_image is not None:
-        
+
         processed = texture_image.copy()
         mask = (depth_image > depth_max) | (depth_image == 0.0)
         processed[mask] = 0
@@ -75,18 +76,21 @@ def read_image(
         if path.suffix.lower() in [".tif", ".tiff"]:
             # tifffile을 사용하여 원본 데이터 타입과 값 보존
             import tifffile
+
             image = tifffile.imread(str(path))
-            
+
             # float32로 변환하여 원본 값 보존
             image = image.astype(np.float32)
-            
+
             # 단일 채널인 경우 3채널로 확장
             if len(image.shape) == 2:
                 image = np.stack([image] * 3, axis=-1)
             elif len(image.shape) == 3 and image.shape[2] == 1:
                 image = np.concatenate([image] * 3, axis=-1)
-            
-            logger.debug(f"TIFF - tifffile.imread: shape={image.shape}, dtype={image.dtype}")
+
+            logger.debug(
+                f"TIFF - tifffile.imread: shape={image.shape}, dtype={image.dtype}"
+            )
             logger.debug(f"TIFF - min={np.min(image)}, max={np.max(image)}")
 
         # 일반 이미지 파일 처리
