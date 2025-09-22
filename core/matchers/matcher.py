@@ -832,7 +832,7 @@ class Matcher:
                 result = self.run_matching_3d(filtered_matches, target_depth, source_depth)
                 time_end = time.time()
                 self.logger.info(f"3D matching time: {time_end - time_start:.3f} seconds")
-                if filtered_matches is None:
+                if result is None:
                     self.logger.error("3D matching failed")        
                     raise Exception("3D matching failed")
 
