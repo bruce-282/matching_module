@@ -7,7 +7,7 @@ import open3d as o3d
 from pathlib import Path
 from typing import Optional, List
 
-from core.utils.logger_utils import get_logger
+from .logger_utils import get_logger
 logger = get_logger(__name__)
 
 

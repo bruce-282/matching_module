@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 import yaml
 import open3d as o3d
-from core.utils.logger_utils import get_logger
+from .logger_utils import get_logger
 from typing import Dict, List, Optional, Tuple, Any
 
 logger = get_logger(__name__)

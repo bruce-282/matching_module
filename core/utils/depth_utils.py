@@ -3,9 +3,9 @@
 Depth map 관련 유틸리티 함수들
 """
 import numpy as np
-from core.utils.logger_utils import get_logger
+from .logger_utils import get_logger
 from typing import Optional, Tuple, List
-from core.utils.camera_utils import Camera
+from .camera_utils import Camera
 
 logger = get_logger(__name__)
 

@@ -9,7 +9,7 @@ import numpy as np
 import cv2
 import logging
 
-from core.utils.logger_utils import get_logger
+from .logger_utils import get_logger
 logger = get_logger(__name__)
 
 logging.getLogger("PIL").setLevel(logging.WARNING)

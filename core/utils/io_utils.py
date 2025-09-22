@@ -7,7 +7,7 @@ import yaml
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
-from core.utils.logger_utils import get_logger
+from .logger_utils import get_logger
 
 logger = get_logger(__name__)
 
