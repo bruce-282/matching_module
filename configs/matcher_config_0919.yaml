@@ -1,12 +1,12 @@
 source_image_path: "datasets/source_0919.tif"
-input_dir: "datasets/0910/"
-output_dir: "output0910"
+input_dir: "datasets/0922/"
+output_dir: "output0922"
 
 max_keypoints: 5000  
 
 geometry_type: "Homography"
 ransac_method: "CV2_USAC_MAGSAC"
-ransac_reproj_threshold: 8.0  
+ransac_reproj_threshold: 13.0  
 ransac_max_iter: 30000
 ransac_confidence: 0.9999
 debug_mode: true
