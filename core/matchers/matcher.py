@@ -889,7 +889,6 @@ class Matcher:
                     f"3D matching time: {time_end - time_start:.3f} seconds"
                 )
                 if result is None:
-                    self.logger.error("3D matching failed")
                     raise Exception("3D matching failed")
 
                 selected_points = self.config.get("selected_points", {})
