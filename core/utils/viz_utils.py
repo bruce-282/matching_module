@@ -24,6 +24,7 @@ def visualize_matches(
     line_thickness: int = 1,
     circle_color: Tuple[int, int, int] = (0, 255, 0),  # 녹색
     line_color: Tuple[int, int, int] = (255, 0, 0),  # 파란색
+    contrast: int = 0,
 ):
     """매칭 결과를 시각화합니다."""
     # 이미지 로드
@@ -76,7 +77,13 @@ def visualize_matches(
             cv2.line(combined_img, (x0, y0), (x1, y1), line_color, line_thickness)
 
     # 결과 저장
+    # 밝기 조정 (더 밝게)
+    if contrast > 0:
+        combined_img = cv2.convertScaleAbs(combined_img, alpha=contrast)
+    else:
+        combined_img = combined_img
     combined_img_bgr = cv2.cvtColor(combined_img, cv2.COLOR_RGB2BGR)
+    
     cv2.imwrite(output_path, combined_img_bgr)
     logger.info(f"Matching result is saved to {output_path}")
     logger.info(f"Total {match_count} matches are visualized.")

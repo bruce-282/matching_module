@@ -485,8 +485,12 @@ class Matcher:
                 output_file = str(
                     self.output_path / f"{result_image_name}_warped_overlapped.png"
                 )
+                if self.config["result_image_brighten"] > 0 :
+                    warp_contrast = cv2.convertScaleAbs(warp_result[0], alpha=self.config["result_image_contrast"])
+                else:
+                    warp_contrast = warp_result[0]
                 cv2.imwrite(
-                    output_file, cv2.cvtColor(warp_result[0], cv2.COLOR_RGB2BGR)
+                    output_file, cv2.cvtColor(warp_contrast, cv2.COLOR_RGB2BGR)
                 )
                 self.logger.debug(f"warped image saved: {output_file}")
 
@@ -534,12 +538,15 @@ class Matcher:
                         target_image.shape[0],
                     ),  # (width, height)
                 )
-
+                if self.config["result_image_contrast"] > 0 :
+                    color_contrast = cv2.convertScaleAbs(color_image, alpha=self.config["result_image_contrast"])
+                else:
+                    color_contrast = color_image
                 # Save color projection
                 color_path = str(
                     self.output_path / f"{result_image_name}_with_anchor.png"
                 )
-                cv2.imwrite(color_path, cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(color_path, cv2.cvtColor(color_contrast, cv2.COLOR_RGB2BGR))
                 self.logger.debug(f"PCD color projection saved: {color_path}")
 
             except Exception as e:
@@ -740,6 +747,7 @@ class Matcher:
             matches_result["confidence"],
             str(output_path / f"{base_name}_failed_matches_original.png"),
             confidence_threshold=self.config["confidence_threshold"],
+            contrast=self.config["result_image_contrast"],
         )
         visualize_matches(
             target_clipped,
@@ -749,6 +757,7 @@ class Matcher:
             ransac_result["filtered_conf"],
             str(output_path / f"{base_name}_failed_matches_ransac_filtered.png"),
             confidence_threshold=self.config["confidence_threshold"],
+            contrast=self.config["result_image_contrast"],
         )
 
     def _backproject_to_3d(self, point):
@@ -854,6 +863,7 @@ class Matcher:
                         / f"{self.target_texture_name}_matches_original.png"
                     ),
                     confidence_threshold=self.config["confidence_threshold"],
+                    contrast=self.config["result_image_contrast"],
                 )
             time_start = time.time()
             filtered_matches = self.run_ransac_filtering(matches)
@@ -881,6 +891,7 @@ class Matcher:
                         / f"{self.target_texture_name}_matches_ransac_filtered.png"
                     ),
                     confidence_threshold=self.config["confidence_threshold"],
+                    contrast=self.config["result_image_contrast"],
                 )
 
             if self.config["enable_3d_matching"]:
