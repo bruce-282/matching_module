@@ -28,3 +28,4 @@ tifffile
 PIL
 
 huggingface_hub
+imagecodecs

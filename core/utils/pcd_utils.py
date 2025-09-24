@@ -479,13 +479,13 @@ def add_3d_points_to_pcd(
     all_point_clouds = []
 
     for point_3d in points_3d:
-        # create points on the surface of the sphere
-        phi = np.linspace(0, 2 * np.pi, 20)
-        theta = np.linspace(0, np.pi, 10)
+        # create points on the surface of the sphere 
+        phi = np.linspace(0, 2 * np.pi, 40)  
+        theta = np.linspace(0, np.pi, 20)    
         phi_grid, theta_grid = np.meshgrid(phi, theta)
 
         # small sphere radius
-        radius = 0.01
+        radius = 0.02
 
         # sphere surface coordinates
         x = point_3d[0] + radius * np.sin(theta_grid) * np.cos(phi_grid)
