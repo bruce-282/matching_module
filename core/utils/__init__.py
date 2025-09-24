@@ -3,12 +3,10 @@ Utilities module for the matching functionality
 """
 
 from .image_utils import load_image, resize_image, normalize_image, read_image
-from .viz_utils import visualize_matches, visualize_keypoints, create_matching_animation
+from .viz_utils import visualize_matches, visualize_keypoints, warp_images
 from .processing_utils import (
     filter_matches,
     compute_geometry,
-    wrap_images,
-    generate_warp_images,
     proc_ransac_matches,
     set_null_pred,
 )
@@ -27,7 +25,6 @@ from .depth_utils import (
     depth_estimation_mad,
     depth_estimation_histogram,
 )
-from .camera_utils import create_default_camera
 
 __all__ = [
     "load_image",
@@ -35,12 +32,10 @@ __all__ = [
     "normalize_image",
     "read_image",
     "visualize_matches",
+    "warp_images",
     "visualize_keypoints",
-    "create_matching_animation",
     "filter_matches",
     "compute_geometry",
-    "wrap_images",
-    "generate_warp_images",
     "proc_ransac_matches",
     "set_null_pred",
     "load_ply_as_image",
@@ -53,7 +48,6 @@ __all__ = [
     "get_pixels_in_radius",
     "depth_estimation_mad",
     "depth_estimation_histogram",
-    "create_default_camera",
 ]
 
 MODEL_REPO_ID = "Realcat/imcui_checkpoints"

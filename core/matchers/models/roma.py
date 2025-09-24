@@ -53,7 +53,7 @@ class Roma(BaseModel):
 
         # 로컬 파일이 있으면 사용, 없으면 다운로드
         if local_model_path.exists():
-            logger.info(f"로컬 모델 파일 사용: {local_model_path}")
+            logger.info(f"Local model file used: {local_model_path}")
             model_path = str(local_model_path)
         else:
             model_path = self._download_model(
@@ -62,7 +62,7 @@ class Roma(BaseModel):
             )
 
         if local_dinov2_path.exists():
-            logger.info(f"로컬 DINOv2 파일 사용: {local_dinov2_path}")
+            logger.info(f"Local DINOv2 file used: {local_dinov2_path}")
             dinov2_weights = str(local_dinov2_path)
         else:
             dinov2_weights = self._download_model(
@@ -71,7 +71,7 @@ class Roma(BaseModel):
                     Path(__file__).stem, self.conf["model_utils_name"]
                 ),
             )
-        logger.info("Loading Roma model")
+        logger.debug("Loading Roma model")
         # load the model
         weights = torch.load(model_path, map_location="cpu")
         dinov2_weights = torch.load(dinov2_weights, map_location="cpu")
@@ -89,7 +89,7 @@ class Roma(BaseModel):
             amp_dtype=amp_dtype,
         )
         self.net.upsample_res = self.conf["upsample_res"]
-        logger.info("Load Roma model done.")
+        logger.debug("Load Roma model done.")
 
     def _forward(self, data):
         img0 = data["image0"].cpu().numpy().squeeze() * 255
@@ -144,42 +144,40 @@ def main():
 
     args = parser.parse_args()
 
-    print("Roma 모델 테스트를 시작합니다...")
-    print(f"이미지0: {args.image0}")
-    print(f"이미지1: {args.image1}")
-    print(f"디바이스: {device}")
+    print(f"image0: {args.image0}")
+    print(f"image1: {args.image1}")
+    print(f"device: {device}")
 
     try:
-        # 이미지 로드
-        print("이미지를 로드하는 중...")
+        # Load images
         image0 = load_image(args.image0)
         image1 = load_image(args.image1)
 
-        # Roma 모델 초기화
-        print("Roma 모델을 초기화하는 중...")
+        # Roma model initialization
+        print("Roma model initialization in progress...")
         conf = Roma.default_conf.copy()
         conf["max_keypoints"] = args.max_keypoints
         roma_model = Roma(conf)
 
-        # 매칭 실행
-        print("이미지 매칭을 실행하는 중...")
+        # Matching execution
+        print("Image matching in progress...")
         data = {
-            "image0": image0.unsqueeze(0),  # 배치 차원 추가
+            "image0": image0.unsqueeze(0),  # Add batch dimension
             "image1": image1.unsqueeze(0),
         }
 
         result = roma_model(data)
 
-        # 결과 출력
+        # Result output
         keypoints0 = result["keypoints0"]
         keypoints1 = result["keypoints1"]
         confidence = result["mconf"]
 
-        print(f"매칭 완료!")
-        print(f"총 매칭 수: {len(keypoints0)}")
-        print(f"평균 신뢰도: {torch.mean(confidence).item():.3f}")
-        print(f"최고 신뢰도: {torch.max(confidence).item():.3f}")
-        print(f"최저 신뢰도: {torch.min(confidence).item():.3f}")
+        print(f"Matching completed!")
+        print(f"Total matches: {len(keypoints0)}")
+        print(f"Average confidence: {torch.mean(confidence).item():.3f}")
+        print(f"Max confidence: {torch.max(confidence).item():.3f}")
+        print(f"Min confidence: {torch.min(confidence).item():.3f}")
 
         # 신뢰도 임계값 이상의 매칭만 필터링
         high_conf_mask = confidence > args.confidence_threshold
@@ -187,10 +185,10 @@ def main():
         high_conf_kpts1 = keypoints1[high_conf_mask]
         high_conf_scores = confidence[high_conf_mask]
 
-        print(f"신뢰도 {args.confidence_threshold} 이상의 매칭: {len(high_conf_kpts0)}")
+        print(f"Confidence {args.confidence_threshold} or higher matches: {len(high_conf_kpts0)}")
 
         # 결과 시각화
-        print("결과를 시각화하는 중...")
+        print("Visualizing results...")
         visualize_matches(
             args.image0,
             args.image1,
@@ -200,10 +198,10 @@ def main():
             args.output,
         )
 
-        print("테스트가 성공적으로 완료되었습니다!")
+        print("Test completed successfully!")
 
     except Exception as e:
-        print(f"오류가 발생했습니다: {e}")
+        print(f"Error occurred: {e}")
         import traceback
 
         traceback.print_exc()

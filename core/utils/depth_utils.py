@@ -3,10 +3,10 @@
 Depth map 관련 유틸리티 함수들
 """
 import numpy as np
-import logging
+from core.utils.logger_utils import get_logger
 from typing import Optional, Tuple, List
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 DEFAULT_DEPTH_MAP_WIDTH = 2064
 DEFAULT_DEPTH_MAP_HEIGHT = 1544
@@ -16,11 +16,11 @@ def point_cloud_to_depth_map(
     points: np.ndarray, colors: Optional[np.ndarray] = None
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """
-    포인트 클라우드를 depth map으로 변환
+    Convert point cloud to depth map
 
     Args:
-        points: 3D 포인트 배열 (N, 3)
-        colors: 색상 배열 (N, 3) - 선택사항
+        points: 3D point array (N, 3)
+        colors: Color array (N, 3) - optional
 
     Returns:
         depth_map: depth map 이미지 (H, W)
@@ -66,14 +66,14 @@ def point_cloud_to_depth_map(
         valid_mask = depth_count > 0
 
         if np.sum(valid_mask) == 0:
-            logger.warning("유효한 depth map을 생성할 수 없습니다.")
+            logger.warning("Valid depth map cannot be created.")
             return None, None
 
-        logger.info(f"Depth map 생성 완료: {np.sum(valid_mask)} 유효 픽셀")
+        logger.info(f"Depth map created: {np.sum(valid_mask)} valid pixels")
         return depth_map, intrinsic
 
     except Exception as e:
-        logger.error(f"Depth map 생성 중 오류: {e}")
+        logger.error(f"Depth map creation error: {e}")
         return None, None
 
 
@@ -83,12 +83,12 @@ def find_depth_from_2d_robust(
     radius: int = 3,
 ) -> Optional[float]:
     """
-    주변 픽셀의 중앙값을 사용한 robust한 depth 값 계산
+    Robust depth value calculation using the median of surrounding pixels
 
     Args:
-        depth_image: depth map 이미지 (H, W)
-        pixel_2d: 2D 픽셀 좌표 (u, v)
-        radius: 주변 픽셀 반지름
+        depth_image: depth map image (H, W)
+        pixel_2d: 2D pixel coordinates (u, v)
+        radius: Radius of surrounding pixels
 
     Returns:
         depth 값 (float) 또는 None
