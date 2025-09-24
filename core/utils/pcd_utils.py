@@ -415,7 +415,7 @@ def add_normal_line_to_pcd(
     normal: np.ndarray,
     line_length=0.1,
     num_points=50,
-    line_color=[1, 0, 0],
+    line_color=[0.0, 1.0, 0.0],
 ):
     """
     Represent normal direction line as points and add to PCD
@@ -464,7 +464,7 @@ def add_normal_line_to_pcd(
 def add_3d_points_to_pcd(
     pcd,
     points_3d: List[np.ndarray],
-    point_color: List[float] = [1, 0, 0],  
+    point_color: List[float] = [0.0, 1.0, 0.0],  # 더 진한 녹색  
 ):
     """
     3D points to PCD with red points
@@ -480,8 +480,8 @@ def add_3d_points_to_pcd(
 
     for point_3d in points_3d:
         # create points on the surface of the sphere 
-        phi = np.linspace(0, 2 * np.pi, 40)  
-        theta = np.linspace(0, np.pi, 20)    
+        phi = np.linspace(0, 2 * np.pi, 80)  
+        theta = np.linspace(0, np.pi, 40)    
         phi_grid, theta_grid = np.meshgrid(phi, theta)
 
         # small sphere radius
