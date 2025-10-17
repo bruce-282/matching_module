@@ -40,7 +40,7 @@ from .geometry_utils import (
     project_3d_point_to_2d,
     project_pcd_to_image,
     project_pcd_to_depth_image,
-    project_pcd_to_images,
+    project_open3d_pcd_to_image,
 )
 
 __all__ = [
@@ -79,7 +79,7 @@ __all__ = [
     "project_3d_point_to_2d",
     "project_pcd_to_image",
     "project_pcd_to_depth_image",
-    "project_pcd_to_images",
+    "project_open3d_pcd_to_image",
 ]
 
 MODEL_REPO_ID = "Realcat/imcui_checkpoints"

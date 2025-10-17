@@ -365,49 +365,7 @@ def create_point_cloud_from_depth_image(
     if point1_3d is not None and point2_3d is not None and point3_3d is not None:
         pcd = add_3d_points_to_pcd(pcd, [point1_3d, point2_3d, point3_3d])
 
-    # pcd = draw_normal_at_center(pcd, center_point_3d, plane_normal)  # type: ignore
     return pcd
-
-
-def draw_normal_at_center(
-    pcd, point, normal: np.ndarray, arrow_length=1.0, arrow_color=[1, 0, 0]
-):
-    """
-    Draw normal arrow at the center of PCD
-    Args:
-        pcd: Open3D point cloud
-        point: center point
-        normal: normal vector
-        arrow_length: length of the arrow
-        arrow_color: color of the arrow
-    """
-    # PCD 중심점
-    center = point
-
-    # Normal
-    normal = np.array(normal)
-    normal = normal / np.linalg.norm(normal)
-
-    # 화살표 생성 (Open3D 내장 함수)
-    arrow = o3d.geometry.TriangleMesh.create_arrow(
-        cylinder_radius=0.02,
-        cone_radius=0.04,
-        cylinder_height=arrow_length * 0.8,
-        cone_height=arrow_length * 0.2,
-    )
-
-    # Z축을 normal 방향으로 회전
-    R = rotation_matrix_from_vectors([0, 0, 1], normal)
-    arrow.rotate(R, center=[0, 0, 0])
-    arrow.translate(center)
-    arrow.paint_uniform_color(arrow_color)
-
-    o3d.visualization.draw_geometries(
-        [pcd, arrow], window_name="PCD with Single Normal", width=800, height=600
-    )
-
-    return arrow
-
 
 def add_normal_line_to_pcd(
     pcd,
@@ -539,3 +497,31 @@ def rotation_matrix_from_vectors(vec1, vec2):
 
     R = np.eye(3) + vx + np.dot(vx, vx) * ((1 - c) / (s**2))
     return R
+
+
+def clip_pointcloud_by_depth(
+    pcd: o3d.geometry.PointCloud, 
+    near_z: float, 
+    far_z: float
+) -> o3d.geometry.PointCloud:
+    """
+    포인트 클라우드를 depth 범위로 클리핑합니다.
+    
+    Args:
+        pcd: 입력 포인트 클라우드
+        near_z: 최소 depth 값
+        far_z: 최대 depth 값
+        
+    Returns:
+        클리핑된 포인트 클라우드
+    """
+    min_bound = pcd.get_min_bound()
+    max_bound = pcd.get_max_bound()
+    
+    # X, Y는 원래 범위 유지, Z만 depth 범위로 제한
+    aabb = o3d.geometry.AxisAlignedBoundingBox(
+        min_bound=[min_bound[0], min_bound[1], near_z],
+        max_bound=[max_bound[0], max_bound[1], far_z],
+    )
+    
+    return pcd.crop(aabb)

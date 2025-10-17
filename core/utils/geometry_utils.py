@@ -475,20 +475,21 @@ def project_pcd_to_depth_image(points_3d: np.ndarray,
     return depth_image
 
 
-def project_pcd_to_images(pcd, 
+def project_open3d_pcd_to_image(pcd, 
                          intrinsic_matrix: np.ndarray = None,
                          image_size: Tuple[int, int] = (640, 480),
                          depth_range: Tuple[float, float] = (0.0, 5000.0)) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Project point cloud to 2D images (color and depth).
+    Project point cloud to 2D image.
     
     Args:
         pcd: Open3D point cloud object
         intrinsic_matrix: 3x3 camera intrinsic matrix
-        image_size: (width, height) of output images
+        image_size: (width, height) of output image
+        depth_range: (min_depth, max_depth) for depth filtering
         
     Returns:
-        Tuple of (color_image)
+        2D image as numpy array (HxWx3)
     """
     # Extract points and colors from PCD
     points_3d = np.asarray(pcd.points)
@@ -505,4 +506,33 @@ def project_pcd_to_images(pcd,
     
     
     return image
+
+
+def create_transform_matrix_from_vectors(
+    right_vector: np.ndarray,
+    up_vector: np.ndarray, 
+    front_vector: np.ndarray,
+    position: np.ndarray
+) -> np.ndarray:
+    """
+    벡터들로부터 4x4 변환 행렬을 생성합니다.
+    
+    Args:
+        right_vector: 우측 방향 벡터 (정규화된 단위 벡터)
+        up_vector: 상단 방향 벡터 (정규화된 단위 벡터)
+        front_vector: 전방 방향 벡터 (정규화된 단위 벡터)
+        position: 위치 벡터 (3D 좌표)
+        
+    Returns:
+        4x4 변환 행렬 (homogeneous transformation matrix)
+    """
+    # 회전 행렬 구성 (카메라 좌표계)
+    rotation_matrix = np.column_stack([right_vector, -up_vector, -front_vector])
+    
+    # 4x4 변환 행렬 생성
+    transform_matrix = np.eye(4)
+    transform_matrix[:3, :3] = rotation_matrix
+    transform_matrix[:3, 3] = position
+    
+    return transform_matrix
     

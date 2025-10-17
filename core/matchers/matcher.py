@@ -40,13 +40,18 @@ from ..utils.pcd_utils import (
     normal_to_angles,
     compute_plane_normal,
     is_ply_file,
+    clip_pointcloud_by_depth,
 )
 from ..utils.camera_utils import Camera
 from ..utils.depth_utils import (
     point_cloud_to_depth_map,
     find_depth_from_2d_robust,
 )
-from ..utils.geometry_utils import project_pcd_to_images, project_3d_point_to_2d
+from ..utils.geometry_utils import (
+    project_open3d_pcd_to_image, 
+    project_3d_point_to_2d,
+    create_transform_matrix_from_vectors
+)
 
 
 class Matcher:
@@ -192,8 +197,7 @@ class Matcher:
         image = image.astype(np.float32, copy=False)
         size = image.shape[:2][::-1]
         scale = np.array([1.0, 1.0])
-        # logger.debug(f"resize_max {resize_max}")
-        # logger.debug(f"force_resize {force_resize}")
+
         if resize_max:
             scale = resize_max / max(size)
             # logger.debug(f"resize_max:size {size} scale {scale}")
@@ -210,7 +214,7 @@ class Matcher:
             )
             size_new = (self.config["resize_width"], self.config["resize_height"])
             scale = np.array(size) / np.array(size_new)
-            # logger.debug(f"force_resize:size {size} size_new {size_new} scale {scale}")
+        
 
         if grayscale:
             assert image.ndim == 2, image.shape
@@ -530,23 +534,57 @@ class Matcher:
         ):
             # Project PCD to 2D images
             try:
-                color_image = project_pcd_to_images(
-                    pcd=pcd,
+                # color_image = project_open3d_pcd_to_image(
+                #     pcd=pcd,
+                #     intrinsic_matrix=camera.get_intrinsic_matrix(),
+                #     image_size=(
+                #         target_image.shape[1],
+                #         target_image.shape[0],
+                #     ),  # (width, height)
+                # )
+                lr_diff = result2_3d - result1_3d
+                lr_distance = np.linalg.norm(lr_diff)
+                camera_distance = lr_distance * 3.0  
+                
+                camera_pos = center_point_3d + plane_normal * camera_distance
+                front_vector = -center_point_3d + camera_pos
+                front_vector = front_vector / np.linalg.norm(front_vector)
+
+                lr_vector = lr_diff / lr_distance
+                up_vector = np.cross(front_vector, lr_vector)
+                up_vector = up_vector / np.linalg.norm(up_vector)
+
+                camera_transform = create_transform_matrix_from_vectors(
+                    right_vector=lr_vector,
+                    up_vector=up_vector,
+                    front_vector=front_vector,
+                    position=camera_pos
+                )
+            
+                pcd_transformed = pcd.transform(np.linalg.inv(camera_transform))
+
+                pcd_clipped = clip_pointcloud_by_depth(pcd_transformed, near_z=0.0, far_z=float(camera_distance + camera_distance*0.1))
+
+                front_view_image = project_open3d_pcd_to_image(
+                    pcd=pcd_clipped,
                     intrinsic_matrix=camera.get_intrinsic_matrix(),
                     image_size=(
                         target_image.shape[1],
                         target_image.shape[0],
                     ),  # (width, height)
                 )
+
+                
                 if self.config["result_image_contrast"] > 0 :
-                    color_contrast = cv2.convertScaleAbs(color_image, alpha=self.config["result_image_contrast"])
-                else:
-                    color_contrast = color_image
+                    #color_image = cv2.convertScaleAbs(color_image, alpha=self.config["result_image_contrast"])
+                    front_view_image = cv2.convertScaleAbs(front_view_image, alpha=self.config["result_image_contrast"])   
+
                 # Save color projection
                 color_path = str(
                     self.output_path / f"{result_image_name}_with_anchor.png"
                 )
-                cv2.imwrite(color_path, cv2.cvtColor(color_contrast, cv2.COLOR_RGB2BGR))
+                #combined_image = np.vstack([color_image, front_view_image])
+                cv2.imwrite(color_path, cv2.cvtColor(front_view_image, cv2.COLOR_RGB2BGR))
                 self.logger.debug(f"PCD color projection saved: {color_path}")
 
             except Exception as e:
@@ -1116,50 +1154,14 @@ class Matcher:
             3D 매칭 결과 딕셔너리 또는 None
         """
         try:
-            # # 1. Fundamental Matrix 추출
-            # if "Fundamental" not in filtered_matches.get("geom_info", {}):
-            #     self.logger.error("Fundamental matrix not found in filtered matches")
-            #     return None
-
-            # F = np.array(filtered_matches["geom_info"]["Fundamental"])
-            # self.logger.debug(f"Fundamental matrix: {F}")
-
-            # E = K.T @ F @ K
-            # self.logger.debug(f"Essential matrix: {E}")
 
             keypoints0 = filtered_matches["filtered_kpts0"].astype(np.int32)
             keypoints1 = filtered_matches["filtered_kpts1"].astype(np.int32)
 
-            # if target_depth_scale > 0 and source_depth_scale > 0:
-            #     # 8-bit → 원본 복원 (원본 범위: 0-2472.207763671875)
-            #     # 8-bit (0-255) → 원본 depth 범위로 복원
-            #     original_max = 2002.207763671875  # 원본 최대값
-            #     original_min = 0.0  # 원본 최소값
-
-            #     depth_source_restored = depth_source.copy().astype(np.float32)
-            #     valid_mask = depth_source > 0
-
-            #     # 8-bit 정규화 복원: (pixel_value / 255.0) * (original_range) + original_min
-            #     depth_source_restored[valid_mask] = (depth_source[valid_mask] / 255.0) * (original_max - original_min) + original_min
-            #     depth_source = depth_source_restored
-
-            #     self.logger.info(f"Applied 8-bit to original depth restoration")
-            #     self.logger.debug(f"8-bit range: 0-255 → Original range: {original_min:.2f}-{original_max:.2f}")
-            #     self.logger.debug(f"Target depth scale: {target_depth_scale:.2f}, Source depth scale: {source_depth_scale:.2f}")
-            # else:
-            #     self.logger.warning("Could not compute depth scale factor, using original depth values")
-
-            # self.logger.info("Using depth images for 3D point extraction")
-
-            # 매칭된 키포인트에서 유효한 depth 값만 추출
+   
             valid_indices = []
             points_3d_target = []
             points_3d_source = []
-
-            # if depth_target.dtype == np.uint8:
-            #     depth_target = depth_target.astype(np.float32)
-            # if depth_source.dtype == np.uint8:
-            #     depth_source = depth_source.astype(np.float32)
 
             valid_count = 0
             boundary_fail_count = 0
@@ -1214,8 +1216,6 @@ class Matcher:
             self.logger.debug(f"Point processing stats:")
             self.logger.debug(f"  - Total points: {len(keypoints0)}")
             self.logger.debug(f"  - Valid 3D points: {valid_count}")
-            self.logger.debug(f"  - Boundary failures: {boundary_fail_count}")
-            self.logger.debug(f"  - Zero depth: {zero_depth_count}")
 
             if len(points_3d_target) < 4:
                 self.logger.error(
