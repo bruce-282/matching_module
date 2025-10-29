@@ -19,7 +19,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from core.matchers.matcher import Matcher
-
+from core.utils.image_utils import read_image
 
 def main():
     """메인 함수"""
@@ -30,6 +30,12 @@ def main():
         type=str,
         required=True,
         help="Configuration file path (YAML)",
+    )
+    parser.add_argument(
+        "--template_param_path",
+        type=str,
+        required=True,
+        help="Template parameter file path (YAML)",
     )
 
     args = parser.parse_args()
@@ -44,6 +50,16 @@ def main():
     except yaml.YAMLError as e:
         print(f"YAML file parsing failed: {e}")
         return
+
+    try:
+        with open(args.template_param_path, 'r', encoding='utf-8') as f:
+            template_param = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Template parameter file not found: {args.template_param_path}")
+        return
+    except yaml.YAMLError as e:
+        print(f"YAML file parsing failed: {e}")
+        return
     # 로거 설정
     from core.utils.logger_utils import setup_logger
     # Set log level
@@ -54,7 +70,7 @@ def main():
     logger = setup_logger(__name__)
 
     # Matcher 인스턴스 생성
-    matcher = Matcher(config)
+    matcher = Matcher(config=config, template_param=template_param)
 
     # 파이프라인 실행
     # 폴더에서 모든 depth.tif와 texture.png 쌍 찾기
@@ -70,6 +86,11 @@ def main():
         logger.warning(f"Warning: No *_depth.tif files found in {input_dir}")
         return
 
+        
+    source_image = read_image(template_param.get("path_match_source"))
+    if source_image is None:
+        logger.error(f"Source image not found: {template_param.get('path_match_source')}")
+        return
 
     for depth_file in depth_files:
         # Extract folder name from file name
@@ -93,10 +114,8 @@ def main():
         try:
             # 이미지 미리 로드 (undistortion 제외)
             logger.info(f"Loading images...")
-            from core.utils.image_utils import read_image
             target_texture = read_image(texture_file)
             target_depth = read_image(depth_file)
-            source_image = read_image(config.get("source_image_path", "datasets/source.png"))
             
             logger.info(f"     target_texture shape/dtype: {target_texture.shape, target_texture.dtype}")
             logger.info(f"     target_depth shape/dtype: {target_depth.shape, target_depth.dtype}")

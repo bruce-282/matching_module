@@ -57,7 +57,7 @@ from ..utils.geometry_utils import (
 class Matcher:
     """통합 이미지 매칭 클래스"""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, template_param: Optional[Dict[str, Any]] = None):
         """
         Matcher 클래스 초기화
 
@@ -91,18 +91,6 @@ class Matcher:
             "debug_mode": False,
             "save_essential": "2d",
             # 이미지 변환 포인트 설정
-            "pointL_pos": {
-                "x_ratio": 0.5,
-                "y_ratio": 0.89,
-            },
-            "pointR_pos": {
-                "x_ratio": 1.38,
-                "y_ratio": 0.89,
-            },
-            "pointU_pos": {
-                "x_ratio": 0.9,
-                "y_ratio": 0.6,
-            },
             "point_radius": 25,
             "depth_max": 2100.0,
             # 3D 매칭 설정
@@ -119,6 +107,13 @@ class Matcher:
             self.logger.debug(f"User Parameters: {self.default_config}")
 
         self.config = self.default_config
+
+        self.template_param = template_param
+        if self.template_param:
+            self.logger.debug(f"Template Parameters: {template_param}")
+        else:
+            self.logger.error("Template parameters not found")
+            raise ValueError("Template parameters not found")
 
         # 디바이스 설정
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -945,7 +940,7 @@ class Matcher:
                 if result is None:
                     raise Exception("3D matching failed")
 
-                selected_points = self.config.get("selected_points", {})
+                selected_points = self.template_param.get("selected_points", {})
                 if selected_points is None:
                     raise Exception("Selected points are not set")
 
