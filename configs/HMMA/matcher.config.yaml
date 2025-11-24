@@ -13,7 +13,7 @@ debug_mode: true
 
 save_essential: "all"  # all, 2d, 3d, none
 
-depth_max: 4000.0
+depth_max: 2500.0
 
 enable_3d_matching: true
 
@@ -24,7 +24,7 @@ pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
 result_image_contrast: 5.0
 # 3D RANSAC 파라미터
 ransac_3d:
-  max_correspondence_distance: 0.01
+  max_correspondence_distance: 0.005
   ransac_n: 7                         
   max_iterations: 5000                
   confidence: 0.9999
