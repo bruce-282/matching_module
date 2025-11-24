@@ -357,8 +357,7 @@ def create_point_cloud_from_depth_image(
     point3_3d = get_scaled_point(point3_3d, 1000.0)
 
     center_point_3d = (point1_3d + point2_3d + point3_3d) / 3
-    # print(f"center_point_3d 2: {center_point_3d}")
-    # print(f"pcd.get_center(): {pcd.get_center()}")
+
     pcd = add_normal_line_to_pcd(pcd, center_point_3d, plane_normal)
 
     # 3개의 3D 포인트에 빨간색 점 추가

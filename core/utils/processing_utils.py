@@ -377,9 +377,10 @@ def registration_ransac_based_on_correspondence(pcd_source: o3d.geometry.PointCl
             criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(max_iterations, confidence)
         )
         
-        logger.info(f"RANSAC registration completed - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
-        logger.debug(f"RANSAC converged: {result.fitness > 0.1}")
-        
+        logger.info(f"[3D RANSAC] registration completed - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
+        logger.debug(f"[3D RANSAC] converged: {result.fitness > 0.1}")
+        logger.debug(f"[3D RANSAC] Inlier correspondences: {len(result.correspondence_set)} pairs")
+        logger.debug(f"[3D RANSAC] transformation : {result.transformation}")
         return result.transformation
         
     except Exception as e:
