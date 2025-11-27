@@ -1,4 +1,4 @@
-path_match_source: "configs/Tucson/tucson.tif"
+path_match_source: "configs/Tucson/tucson_undistorted.tif"
 
 selected_points:
   L:

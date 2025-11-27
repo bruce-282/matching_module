@@ -88,10 +88,10 @@ def read_image(
             elif len(image.shape) == 3 and image.shape[2] == 1:
                 image = np.concatenate([image] * 3, axis=-1)
 
-            logger.debug(
-                f"TIFF - tifffile.imread: shape={image.shape}, dtype={image.dtype}"
-            )
-            logger.debug(f"TIFF - min={np.min(image)}, max={np.max(image)}")
+            # logger.debug(
+            #     f"TIFF - tifffile.imread: shape={image.shape}, dtype={image.dtype}"
+            # )
+            # logger.debug(f"TIFF - min={np.min(image)}, max={np.max(image)}")
 
         # 일반 이미지 파일 처리
         else:

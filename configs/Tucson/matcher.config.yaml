@@ -1,5 +1,5 @@
-input_dir: "datasets/new_angle/Tucson/"
-output_dir: "new_angle/Tucson"
+input_dir: "datasets/new_angle/tucson_undistorted/"
+output_dir: "new_angle/tucson_undistorted"
 
 max_keypoints: 5000  
 
@@ -46,6 +46,6 @@ image_size:
   width: 2064
   height: 1544
 
-#roi_2d_src: [700, 100, 2064, 1200] # [x1, y1, x2, y2]
+roi_2d_src: [700, 100, 2064, 1200] # [x1, y1, x2, y2]
 
 image_undistortion: false

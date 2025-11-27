@@ -188,7 +188,7 @@ def main():
         "--input_path",
         type=str,
         required=True,
-        help="입력 이미지 경로",
+        help="입력 이미지 경로 또는 폴더 경로",
     )
     parser.add_argument(
         "--output_dir",

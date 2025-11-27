@@ -113,19 +113,12 @@ class Matcher:
             self.logger.debug(f"User Parameters: {self.default_config}")
 
         self.config = self.default_config
-
-        self.template_param = template_param
-        if self.template_param:
-            self.logger.debug(f"Template Parameters: {template_param}")
-        else:
-            self.logger.error("Template parameters not found")
-            raise ValueError("Template parameters not found")
-
+        self.template_param = template_param or None
         # 디바이스 설정
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # 시간 측정을 위한 변수들
-        self.model_init_time = 0.0
+ 
         self.matching_time = 0.0
 
         # 모델 초기화
@@ -141,8 +134,30 @@ class Matcher:
             f"Model initialization completed (time: {model_init_time:.3f} seconds)"
         )
         self.camera = None
+
+        self.init_config(config=config, template_param=template_param)
         # Camera 객체 생성 및 이미지 undistortion
         # YAML 설정에서 카메라 파라미터 직접 읽기
+        time.sleep(1)
+
+
+    def init_config(self, config: Optional[Dict[str, Any]] = None, template_param: Optional[Dict[str, Any]] = None):
+        """
+        Initialize parameters
+
+        Args:
+            config: Configuration dictionary
+            template_param: Template parameters dictionary
+        """
+        if config:
+            self.default_config.update(config)
+        self.config = self.default_config
+        
+        self.template_param = template_param or None
+        if self.config:
+            self.logger.info(f"Matcher Parameters: {self.config}")
+        if self.template_param:
+            self.logger.info(f"Template Parameters: {self.template_param}")
         if "camera_intrinsics" in self.config and "camera_distortions" in self.config:
             try:
                 from ..utils.io_utils import create_camera_from_yaml_config
@@ -883,10 +898,10 @@ class Matcher:
         result3_3d = None
         plane_normal = None
 
-        if self.config["result_image_contrast"] > 0:
-            target_texture = cv2.convertScaleAbs(
-                target_texture, alpha=self.config["result_image_contrast"]
-            )
+        # if self.config["result_image_contrast"] > 0:
+        #     target_texture = cv2.convertScaleAbs(
+        #         target_texture, alpha=self.config["result_image_contrast"]
+        #     )
         if "roi_2d_src" in self.config and self.config["roi_2d_src"] is not None:
             source_image = apply_roi_mask(source_image, self.config["roi_2d_src"])
 

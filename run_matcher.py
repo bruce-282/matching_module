@@ -74,6 +74,7 @@ def main():
     # Matcher 인스턴스 생성
     matcher = Matcher(config=config, template_param=template_param)
 
+    matcher.init_config(config=config, template_param=template_param)
     # 파이프라인 실행
     # 폴더에서 모든 depth.tif와 texture.png 쌍 찾기
     import glob
