@@ -93,7 +93,7 @@ class Camera:
         return self.dist_coeffs.copy()
 
 
-def create_default_camera(image_size: Tuple[int, int]) -> Camera:
+def create_default_camera(image_size: Tuple[int, int] = (2064, 1544)) -> Camera:
     """
     기본 카메라 설정으로 Camera 객체 생성
 

@@ -28,7 +28,7 @@ ransac_3d:
   max_iterations: 3000                
   confidence: 0.9999
 
-point_radius: 25
+point_radius: 55
 
 camera_intrinsics:
   fx: 2344.06988494

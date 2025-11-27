@@ -288,12 +288,7 @@ def save_pointcloud_with_normal(
 
 def create_point_cloud_from_depth_image(
     depth_image,  # np.ndarray 또는 o3d.geometry.Image
-    plane_normal: np.ndarray,
-    center_point_3d: np.ndarray,
     intrinsic: np.ndarray,
-    point1_3d: Optional[np.ndarray] = None,
-    point2_3d: Optional[np.ndarray] = None,
-    point3_3d: Optional[np.ndarray] = None,
     texture_image: Optional[np.ndarray] = None,  # texture 이미지 추가
 ):
     """
@@ -346,23 +341,6 @@ def create_point_cloud_from_depth_image(
         intrinsic_matrix=intrinsic,
     )
     pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, o3d_intrinsic)
-
-    # print(f"center_point_3d: {center_point_3d}")
-    def get_scaled_point(point, scale):
-        point_3d = np.array(point) / scale
-        return point_3d
-
-    point1_3d = get_scaled_point(point1_3d, 1000.0)
-    point2_3d = get_scaled_point(point2_3d, 1000.0)
-    point3_3d = get_scaled_point(point3_3d, 1000.0)
-
-    center_point_3d = (point1_3d + point2_3d + point3_3d) / 3
-
-    pcd = add_normal_line_to_pcd(pcd, center_point_3d, plane_normal)
-
-    # 3개의 3D 포인트에 빨간색 점 추가
-    if point1_3d is not None and point2_3d is not None and point3_3d is not None:
-        pcd = add_3d_points_to_pcd(pcd, [point1_3d, point2_3d, point3_3d])
 
     return pcd
 

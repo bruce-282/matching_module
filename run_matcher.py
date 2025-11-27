@@ -119,15 +119,15 @@ def main():
             target_texture = read_image(texture_file)
             target_depth = read_image(depth_file)
 
-            logger.info(
-                f"     target_texture shape/dtype: {target_texture.shape, target_texture.dtype}"
-            )
-            logger.info(
-                f"     target_depth shape/dtype: {target_depth.shape, target_depth.dtype}"
-            )
-            logger.info(
-                f"     source_image shape/dtype: {source_image.shape, source_image.dtype}"
-            )
+            # logger.info(
+            #     f"     target_texture shape/dtype: {target_texture.shape, target_texture.dtype}"
+            # )
+            # logger.info(
+            #     f"     target_depth shape/dtype: {target_depth.shape, target_depth.dtype}"
+            # )
+            # logger.info(
+            #     f"     source_image shape/dtype: {source_image.shape, source_image.dtype}"
+            # )
 
             time_start = time.time()
             result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(

@@ -37,6 +37,8 @@ from ..utils.processing_utils import (
 from ..utils.io_utils import save_points_to_yaml
 from ..utils.pcd_utils import (
     create_point_cloud_from_depth_image,
+    add_normal_line_to_pcd,
+    add_3d_points_to_pcd,
     normal_to_angles,
     compute_plane_normal,
     is_ply_file,
@@ -73,14 +75,14 @@ class Matcher:
             # 출력 설정
             "output_dir": "output",
             # 매칭 설정
-            "max_keypoints": 2000,
+            "max_keypoints": 3000,
             "match_threshold": 0.2,
             "model_name": "minima_roma.pth",
             # RANSAC 설정
             "ransac_method": "CV2_USAC_MAGSAC",
-            "ransac_reproj_threshold": 8.0,
+            "ransac_reproj_threshold": 12.0,
             "ransac_confidence": 0.9999,
-            "ransac_max_iter": 300000,
+            "ransac_max_iter": 30000,
             "min_num_matches": 4,
             "geometry_type": "Homography",  # Homography or Fundamental
             # 시각화 설정
@@ -96,7 +98,7 @@ class Matcher:
             "save_essential": "2d",
             # 이미지 변환 포인트 설정
             "point_radius": 25,
-            "depth_max": 2100.0,
+            "depth_max": 2400.0,
             # 3D 매칭 설정
             "pose_estimation_method": "ransac",
             "stable_depth_range": 50.0,
@@ -509,16 +511,25 @@ class Matcher:
         ):
             pcd = create_point_cloud_from_depth_image(
                 target_depth,  # depth 이미지
-                plane_normal,
-                center_point_3d,
                 camera.get_intrinsic_matrix(),
-                result1_3d,
-                result2_3d,
-                result3_3d,
                 texture_image=(
                     target_texture if target_texture is not None else None
                 ),  # texture 이미지 (source 이미지 사용)
             )
+
+            def get_scaled_point(point, scale):
+                point_3d = np.array(point) / scale
+                return point_3d
+
+            scaledL_3d = get_scaled_point(result1_3d, 1000.0)
+            scaledR_3d = get_scaled_point(result2_3d, 1000.0)
+            scaledU_3d = get_scaled_point(result3_3d, 1000.0)
+
+            pcd = add_3d_points_to_pcd(pcd, [scaledL_3d, scaledR_3d, scaledU_3d])
+            #scaled_center_point_3d = (scaledL_3d + scaledR_3d + scaledU_3d) / 3
+            #pcd = add_normal_line_to_pcd(pcd, scaled_center_point_3d, plane_normal, line_length=0.1)
+        
+            
             pcd.scale(1000.0, center=[0, 0, 0])
 
             pcd_path = str(self.output_path / f"{result_image_name}_with_anchor.ply")
@@ -724,13 +735,13 @@ class Matcher:
             )
             if z2 is None:
                 self.logger.error(f"pointR depth calculation failed")
-                return None
+                return z1, None, None
             z3 = find_depth_from_2d_robust(
                 target_depth, (int(point3_2d[0]), int(point3_2d[1])), radius
             )
             if z3 is None:
                 self.logger.error(f"pointU depth calculation failed")
-                return None
+                return z1, z2, None
             else:
                 self.logger.debug(
                     f"depth calculation completed: {z1:.1f}, {z2:.1f}, {z3:.1f}"
@@ -872,11 +883,11 @@ class Matcher:
         result3_3d = None
         plane_normal = None
 
-        # if self.config["result_image_contrast"] > 0:
-        #     target_texture = cv2.convertScaleAbs(
-        #         target_texture, alpha=self.config["result_image_contrast"]
-        #     )
-        if self.config["roi_2d_src"] is not None:
+        if self.config["result_image_contrast"] > 0:
+            target_texture = cv2.convertScaleAbs(
+                target_texture, alpha=self.config["result_image_contrast"]
+            )
+        if "roi_2d_src" in self.config and self.config["roi_2d_src"] is not None:
             source_image = apply_roi_mask(source_image, self.config["roi_2d_src"])
 
         try:
@@ -898,6 +909,27 @@ class Matcher:
                     depth_image=target_depth,
                     depth_max=self.config["depth_max"],
                 )
+            if self.config["image_undistortion"]:
+                source_image = self.camera.undistort_image(source_image)
+
+            def get_point_by_config(selected_points, point_name):
+                return np.array(
+                    [
+                        selected_points[point_name]["x"],
+                        selected_points[point_name]["y"],
+                        selected_points[point_name]["z"],
+                    ]
+                )
+            selected_points = self.template_param.get("selected_points", {})
+            if selected_points is None:
+                raise Exception("Selected points are not set")
+            result1_3d = get_point_by_config(selected_points, "L")
+            result2_3d = get_point_by_config(selected_points, "R")
+            result3_3d = get_point_by_config(selected_points, "U")
+            plane_normal = compute_plane_normal(result1_3d, result2_3d, result3_3d)
+
+
+
             time_start = time.time()
             matches = self.run_matching(target_clipped, source_image)
             time_end = time.time()
@@ -970,27 +1002,6 @@ class Matcher:
                 if selected_points is None:
                     raise Exception("Selected points are not set")
 
-                result1_3d = np.array(
-                    [
-                        selected_points["L"]["x"],
-                        selected_points["L"]["y"],
-                        selected_points["L"]["z"],
-                    ]
-                )
-                result2_3d = np.array(
-                    [
-                        selected_points["R"]["x"],
-                        selected_points["R"]["y"],
-                        selected_points["R"]["z"],
-                    ]
-                )
-                result3_3d = np.array(
-                    [
-                        selected_points["U"]["x"],
-                        selected_points["U"]["y"],
-                        selected_points["U"]["z"],
-                    ]
-                )
 
                 transform_matrix = result["transformation"]
 
@@ -1024,10 +1035,11 @@ class Matcher:
                     point3_2d=point3_2d,
                     radius=self.config["point_radius"],
                 )
-                if z_depthmap is None:
-                    self.logger.warning(
-                        f"Out of stable depth range: calculate anchor depth failed"
-                    )
+                if z_depthmap is None or any(x is None for x in z_depthmap):
+                    if z_depthmap is not None:
+                        self.logger.error(
+                            f"calculate anchor depth failed: pointL: {z_depthmap[0]}, pointR: {z_depthmap[1]}, pointU: {z_depthmap[2]}"
+                        )
                     return None, None, None, None
                 # Check depth stability for all points
                 points_3d = [result1_3d, result2_3d, result3_3d]
@@ -1324,7 +1336,6 @@ class Matcher:
                 self.logger.error("Intial pose estimation failed")
                 return None
 
-            # 6. Open3D Point Cloud 생성
 
             pcd_source_transformed = copy.deepcopy(pcd_source)
 
