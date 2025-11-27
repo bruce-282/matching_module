@@ -27,7 +27,7 @@ sys.path.insert(0, str(project_root))
 # 로거 설정
 from core.utils.logger_utils import setup_logger
 from .models.roma import Roma
-from ..utils.image_utils import resize_image, process_depth_map
+from ..utils.image_utils import resize_image, process_depth_map, apply_roi_mask
 from ..utils.viz_utils import visualize_matches, warp_images
 from ..utils.processing_utils import (
     filter_matches,
@@ -48,16 +48,20 @@ from ..utils.depth_utils import (
     find_depth_from_2d_robust,
 )
 from ..utils.geometry_utils import (
-    project_open3d_pcd_to_image, 
+    project_open3d_pcd_to_image,
     project_3d_point_to_2d,
-    create_transform_matrix_from_vectors
+    create_transform_matrix_from_vectors,
 )
 
 
 class Matcher:
     """통합 이미지 매칭 클래스"""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, template_param: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        template_param: Optional[Dict[str, Any]] = None,
+    ):
         """
         Matcher 클래스 초기화
 
@@ -209,7 +213,6 @@ class Matcher:
             )
             size_new = (self.config["resize_width"], self.config["resize_height"])
             scale = np.array(size) / np.array(size_new)
-        
 
         if grayscale:
             assert image.ndim == 2, image.shape
@@ -484,13 +487,13 @@ class Matcher:
                 output_file = str(
                     self.output_path / f"{result_image_name}_warped_overlapped.png"
                 )
-                if self.config["result_image_brighten"] > 0 :
-                    warp_contrast = cv2.convertScaleAbs(warp_result[0], alpha=self.config["result_image_contrast"])
+                if self.config["result_image_brighten"] > 0:
+                    warp_contrast = cv2.convertScaleAbs(
+                        warp_result[0], alpha=self.config["result_image_contrast"]
+                    )
                 else:
                     warp_contrast = warp_result[0]
-                cv2.imwrite(
-                    output_file, cv2.cvtColor(warp_contrast, cv2.COLOR_RGB2BGR)
-                )
+                cv2.imwrite(output_file, cv2.cvtColor(warp_contrast, cv2.COLOR_RGB2BGR))
                 self.logger.debug(f"warped image saved: {output_file}")
 
             except Exception as e:
@@ -539,8 +542,8 @@ class Matcher:
                 # )
                 lr_diff = result2_3d - result1_3d
                 lr_distance = np.linalg.norm(lr_diff)
-                camera_distance = lr_distance * 3.0  
-                
+                camera_distance = lr_distance * 3.0
+
                 camera_pos = center_point_3d + plane_normal * camera_distance
                 front_vector = -center_point_3d + camera_pos
                 front_vector = front_vector / np.linalg.norm(front_vector)
@@ -553,12 +556,16 @@ class Matcher:
                     right_vector=lr_vector,
                     up_vector=up_vector,
                     front_vector=front_vector,
-                    position=camera_pos
+                    position=camera_pos,
                 )
-            
+
                 pcd_transformed = pcd.transform(np.linalg.inv(camera_transform))
 
-                pcd_clipped = clip_pointcloud_by_depth(pcd_transformed, near_z=0.0, far_z=float(camera_distance + camera_distance*0.1))
+                pcd_clipped = clip_pointcloud_by_depth(
+                    pcd_transformed,
+                    near_z=0.0,
+                    far_z=float(camera_distance + camera_distance * 0.1),
+                )
 
                 front_view_image = project_open3d_pcd_to_image(
                     pcd=pcd_clipped,
@@ -569,17 +576,20 @@ class Matcher:
                     ),  # (width, height)
                 )
 
-                
-                if self.config["result_image_contrast"] > 0 :
-                    #color_image = cv2.convertScaleAbs(color_image, alpha=self.config["result_image_contrast"])
-                    front_view_image = cv2.convertScaleAbs(front_view_image, alpha=self.config["result_image_contrast"])   
+                if self.config["result_image_contrast"] > 0:
+                    # color_image = cv2.convertScaleAbs(color_image, alpha=self.config["result_image_contrast"])
+                    front_view_image = cv2.convertScaleAbs(
+                        front_view_image, alpha=self.config["result_image_contrast"]
+                    )
 
                 # Save color projection
                 color_path = str(
                     self.output_path / f"{result_image_name}_with_anchor.png"
                 )
-                #combined_image = np.vstack([color_image, front_view_image])
-                cv2.imwrite(color_path, cv2.cvtColor(front_view_image, cv2.COLOR_RGB2BGR))
+                # combined_image = np.vstack([color_image, front_view_image])
+                cv2.imwrite(
+                    color_path, cv2.cvtColor(front_view_image, cv2.COLOR_RGB2BGR)
+                )
                 self.logger.debug(f"PCD color projection saved: {color_path}")
 
             except Exception as e:
@@ -706,17 +716,26 @@ class Matcher:
             z1 = find_depth_from_2d_robust(
                 target_depth, (int(point1_2d[0]), int(point1_2d[1])), radius
             )
+            if z1 is None:
+                self.logger.error(f"pointL depth calculation failed")
+                return None
             z2 = find_depth_from_2d_robust(
                 target_depth, (int(point2_2d[0]), int(point2_2d[1])), radius
             )
+            if z2 is None:
+                self.logger.error(f"pointR depth calculation failed")
+                return None
             z3 = find_depth_from_2d_robust(
                 target_depth, (int(point3_2d[0]), int(point3_2d[1])), radius
             )
-
-            # z값만 반환
-            if z1 is not None and z2 is not None and z3 is not None:
+            if z3 is None:
+                self.logger.error(f"pointU depth calculation failed")
+                return None
+            else:
+                self.logger.debug(
+                    f"depth calculation completed: {z1:.1f}, {z2:.1f}, {z3:.1f}"
+                )
                 return z1, z2, z3
-            return None
 
         try:
             import open3d as o3d
@@ -852,6 +871,13 @@ class Matcher:
         result2_3d = None
         result3_3d = None
         plane_normal = None
+
+        # if self.config["result_image_contrast"] > 0:
+        #     target_texture = cv2.convertScaleAbs(
+        #         target_texture, alpha=self.config["result_image_contrast"]
+        #     )
+        if self.config["roi_2d_src"] is not None:
+            source_image = apply_roi_mask(source_image, self.config["roi_2d_src"])
 
         try:
             if self.config["image_undistortion"]:
@@ -1153,7 +1179,6 @@ class Matcher:
             keypoints0 = filtered_matches["filtered_kpts0"].astype(np.int32)
             keypoints1 = filtered_matches["filtered_kpts1"].astype(np.int32)
 
-   
             valid_indices = []
             points_3d_target = []
             points_3d_source = []

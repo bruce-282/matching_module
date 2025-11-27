@@ -149,3 +149,33 @@ def normalize_image(image):
     else:
         image_np = np.array(image)
         return (image_np - image_np.mean()) / image_np.std()
+
+
+def apply_roi_mask(image: np.ndarray, roi: list, inplace: bool = False) -> np.ndarray:
+    """
+    ROI 영역 외의 부분을 0으로 설정합니다.
+    이미지 크기는 유지하고 ROI 영역만 유효하게 만듭니다.
+
+    Args:
+        image: 입력 이미지 (H, W) 또는 (H, W, C)
+        roi: ROI 영역 [x1, y1, x2, y2] 형식
+        inplace: True이면 원본 이미지를 수정, False이면 복사본 반환
+
+    Returns:
+        ROI 영역 외의 부분이 0으로 설정된 이미지
+    """
+    if roi is None or len(roi) != 4:
+        return image
+
+    x1, y1, x2, y2 = roi[0], roi[1], roi[2], roi[3]
+
+    if not inplace:
+        image = image.copy()
+
+    # ROI 영역 외의 부분을 0으로 설정
+    image[:y1, :] = 0  # 위쪽 영역
+    image[y2:, :] = 0  # 아래쪽 영역
+    image[:, :x1] = 0  # 왼쪽 영역
+    image[:, x2:] = 0  # 오른쪽 영역
+
+    return image

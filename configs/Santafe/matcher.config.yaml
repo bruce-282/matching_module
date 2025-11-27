@@ -1,19 +1,18 @@
+input_dir: "datasets/new_angle/"
+output_dir: "new_angle"
 
-input_dir: "datasets/20251122/"
-output_dir: "20251122"
-
-max_keypoints: 5000  
+max_keypoints: 7000  
 
 geometry_type: "Homography"
 ransac_method: "CV2_USAC_MAGSAC"
 ransac_reproj_threshold: 13.0  
-ransac_max_iter: 30000
+ransac_max_iter: 80000
 ransac_confidence: 0.9999
 debug_mode: true
 
 save_essential: "all"  # all, 2d, 3d, none
 
-depth_max: 4000.0
+depth_max: 2500.0
 
 enable_3d_matching: true
 
@@ -24,11 +23,12 @@ pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
 result_image_contrast: 5.0
 # 3D RANSAC 파라미터
 ransac_3d:
-  max_correspondence_distance: 0.01
+  max_correspondence_distance: 0.2
   ransac_n: 7                         
-  max_iterations: 5000                
+  max_iterations: 3000                
   confidence: 0.9999
-              
+
+point_radius: 25
 
 camera_intrinsics:
   fx: 2344.06988494
