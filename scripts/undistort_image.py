@@ -185,9 +185,22 @@ def main():
     """메인 함수"""
     parser = argparse.ArgumentParser(description="이미지 Undistortion 도구")
     parser.add_argument(
+        "--input_path",
+        type=str,
+        required=True,
+        help="입력 이미지 경로",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,   
+        default="output",
+        help="출력 디렉토리 경로",
+    )
+    parser.add_argument(
         "--config_path",
         type=str,
         required=True,
+        default="configs/matcher_config.yaml",
         help="설정 파일 경로 (YAML)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="상세 로그 출력")
@@ -210,18 +223,11 @@ def main():
         return 1
 
     # 필요한 설정값들 추출
-    source_image_path = config.get("source_image_path")
-    output_dir = config.get("output_dir", "output")
-    
-    if not source_image_path:
-        logger.error("source_image_path가 설정 파일에 없습니다.")
-        return 1
-
-    # 입력 경로 확인
-    input_path = Path(source_image_path)
-    if not input_path.exists():
-        logger.error(f"입력 경로가 존재하지 않습니다: {input_path}")
-        return 1
+    input_path = args.input_path
+    output_dir = args.output_dir
+    input_path = Path(input_path)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Camera 객체 생성
     try:
