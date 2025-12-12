@@ -133,6 +133,9 @@ class Matcher:
         self.logger.info(
             f"Model initialization completed (time: {model_init_time:.3f} seconds)"
         )
+        
+        self._warmup_model()
+        
         self.camera = None
 
         self.init_config(config=config, template_param=template_param)
@@ -140,6 +143,35 @@ class Matcher:
         # YAML 설정에서 카메라 파라미터 직접 읽기
         time.sleep(1)
 
+    def _warmup_model(self) -> None:
+        """
+        모델 웜업 수행 (첫 실행 시 느린 문제 해결)
+        
+        더미 이미지를 사용하여 모델을 한 번 실행하여
+        CUDA 커널 초기화, 메모리 할당 등을 미리 수행합니다.
+        """
+        warmup_start_time = time.time()
+        self.logger.info("Warming up model...")
+        try:
+            # 작은 더미 이미지 생성 (웜업용)
+            dummy_size = (3, 256, 256)  # (C, H, W)
+            dummy_image0 = torch.randn(1, *dummy_size, device=self.device)
+            dummy_image1 = torch.randn(1, *dummy_size, device=self.device)
+            
+            warmup_data = {
+                "image0": dummy_image0,
+                "image1": dummy_image1,
+            }
+            
+            # 웜업 실행
+            _ = self.model(warmup_data)
+            
+            warmup_time = time.time() - warmup_start_time
+            self.logger.info(
+                f"Model warmup completed (time: {warmup_time:.3f} seconds)"
+            )
+        except Exception as e:
+            self.logger.warning(f"Model warmup failed: {e}")
 
     def init_config(self, config: Optional[Dict[str, Any]] = None, template_param: Optional[Dict[str, Any]] = None):
         """
