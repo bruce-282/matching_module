@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Optional, List
 
 from .logger_utils import get_logger
-logger = get_logger(__name__)
 
+logger = get_logger(__name__)
 
 
 class PointCloudToImageConverter:
@@ -28,46 +28,43 @@ class PointCloudToImageConverter:
         self.height = height
         self.intrinsic_matrix = intrinsic_matrix
 
-    def _point_cloud_to_rgb_image(self, pcd: o3d.geometry.PointCloud) -> np.ndarray:
+    def _point_cloud_to_depth_image(self, pcd: o3d.geometry.PointCloud) -> np.ndarray:
         """
-        Convert point cloud to RGB image
+        Convert point cloud to depth image (mm unit)
 
         Args:
             pcd: Open3D point cloud object
 
         Returns:
-            RGB image (height, width, 3)
+            Depth image (height, width) in mm unit
 
         Raises:
             ValueError: conversion failed
         """
-        if not pcd.has_points() or not pcd.has_colors():
-            raise ValueError("Point cloud must have both points and colors.")
+        if not pcd.has_points():
+            raise ValueError("Point cloud must have points.")
 
         points = np.asarray(pcd.points)
-        colors = np.asarray(pcd.colors) * 255  # convert colors to 0-255 range
 
-        if points.shape[0] != colors.shape[0]:
-            raise ValueError(
-                f"Number of points ({points.shape[0]}) and colors ({colors.shape[0]}) do not match."
-            )
-
-        rgb_image = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        # Depth 이미지 초기화 (mm 단위)
+        depth_image = np.zeros((self.height, self.width), dtype=np.float32)
 
         K = self.intrinsic_matrix
 
         try:
             for i, point in enumerate(points):
                 x, y, z = point
-                if z != 0:
+                if z > 0:  # 유효한 depth 값만 사용
                     u = int((K[0, 0] * x + K[0, 2] * z) / z)
                     v = int((K[1, 1] * y + K[1, 2] * z) / z)
                     if 0 <= u < self.width and 0 <= v < self.height:
-                        rgb_image[v, u] = colors[i]
+                        # 여러 포인트가 같은 픽셀에 매핑될 경우 가장 가까운 depth 값 사용
+                        if depth_image[v, u] == 0 or z < depth_image[v, u]:
+                            depth_image[v, u] = z
         except Exception as e:
             raise ValueError(f"Failed to project points to image: {e}")
 
-        return rgb_image
+        return depth_image
 
 
 def compute_plane_normal(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray) -> np.ndarray:
@@ -92,10 +89,10 @@ def compute_plane_normal(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray) -> np.n
 
 def normal_to_angles(normal: np.ndarray) -> tuple:
     """Normal 벡터를 각도로 변환
-    
+
     Args:
         normal: 정규화된 법선 벡터 [x, y, z]
-        
+
     Returns:
         tuple: (horizontal_deg, vertical_deg)
             - horizontal_deg: 수평각 (도) - 수평면에서의 방향
@@ -103,17 +100,17 @@ def normal_to_angles(normal: np.ndarray) -> tuple:
     """
     if normal is None:
         return None, None
-        
+
     x, y, z = normal
-    
+
     # Horizontal (수평각): 수평면에서의 방향
     horizontal_rad = np.arctan2(y, x)  # -π ~ π radian
     horizontal_deg = np.degrees(horizontal_rad)  # -180° ~ 180°
-    
-    # Vertical (수직각): 수직면에서의 방향  
+
+    # Vertical (수직각): 수직면에서의 방향
     vertical_rad = np.arccos(z)  # 0 ~ π radian
     vertical_deg = np.degrees(vertical_rad)  # 0° ~ 180°
-    
+
     return horizontal_deg, vertical_deg
 
 
@@ -144,9 +141,11 @@ def load_ply_as_image(
         raise FileNotFoundError(f"PLY file not found: {ply_path}")
 
     if intrinsic_matrix is None:
-        intrinsic_matrix = np.array(
-            [[width, 0, width / 2], [0, height, height / 2], [0, 0, 1]]
-        )
+        fx = 2344.06988494
+        fy = 2344.40009342502
+        cx = 989.06314625513
+        cy = 807.02989528271
+        intrinsic_matrix = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
 
     try:
         logger.info(f"Loading PLY file: {ply_path}")
@@ -155,18 +154,22 @@ def load_ply_as_image(
         if not pcd.has_points():
             raise ValueError("PLY file does not have points.")
 
-        if not pcd.has_colors():
-            logger.warning(
-                "PLY file does not have color information. Using default color (white)."
-            )
-            colors = np.ones((len(pcd.points), 3), dtype=np.float32)
-            pcd.colors = o3d.utility.Vector3dVector(colors)
-
         converter = PointCloudToImageConverter(width, height, intrinsic_matrix)
-        rgb_image = converter._point_cloud_to_rgb_image(pcd)
+        depth_image = converter._point_cloud_to_depth_image(pcd)
 
-        logger.info(f"PLY file to image conversion completed: {rgb_image.shape}")
-        return rgb_image
+        # float32로 변환하여 원본 값 보존 (TIFF 읽기와 동일한 방식)
+        depth_image = depth_image.astype(np.float32)
+
+        # 단일 채널인 경우 3채널로 확장 (TIFF 읽기와 동일한 방식)
+        if len(depth_image.shape) == 2:
+            depth_image = np.stack([depth_image] * 3, axis=-1)
+        elif len(depth_image.shape) == 3 and depth_image.shape[2] == 1:
+            depth_image = np.concatenate([depth_image] * 3, axis=-1)
+
+        logger.info(
+            f"PLY file to depth image conversion completed: {depth_image.shape} (mm unit)"
+        )
+        return depth_image
 
     except Exception as e:
         if isinstance(e, ValueError):
@@ -226,7 +229,6 @@ def visualize_normal_on_pointcloud(
     center_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
     center_sphere.translate(center_point_3d)
     center_sphere.paint_uniform_color(center_color)
-
 
     return pcd, normal_line, center_sphere
 
@@ -307,15 +309,13 @@ def create_point_cloud_from_depth_image(
     else:
         depth_array = depth_image
 
-
     h, w = depth_array.shape[:2]
 
     depth_scaled = (depth_array).astype(np.float32)
     depth_o3d = o3d.geometry.Image(depth_scaled)
 
-
     if texture_image is not None:
-    
+
         if len(texture_image.shape) == 2:
             color_array = cv2.cvtColor(texture_image, cv2.COLOR_GRAY2RGB)
         else:
@@ -343,6 +343,7 @@ def create_point_cloud_from_depth_image(
     pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, o3d_intrinsic)
 
     return pcd
+
 
 def add_normal_line_to_pcd(
     pcd,
@@ -399,7 +400,7 @@ def add_normal_line_to_pcd(
 def add_3d_points_to_pcd(
     pcd,
     points_3d: List[np.ndarray],
-    point_color: List[float] = [0.0, 1.0, 0.0],  # 더 진한 녹색  
+    point_color: List[float] = [0.0, 1.0, 0.0],  # 더 진한 녹색
 ):
     """
     3D points to PCD with red points
@@ -414,9 +415,9 @@ def add_3d_points_to_pcd(
     all_point_clouds = []
 
     for point_3d in points_3d:
-        # create points on the surface of the sphere 
-        phi = np.linspace(0, 2 * np.pi, 80)  
-        theta = np.linspace(0, np.pi, 40)    
+        # create points on the surface of the sphere
+        phi = np.linspace(0, 2 * np.pi, 80)
+        theta = np.linspace(0, np.pi, 40)
         phi_grid, theta_grid = np.meshgrid(phi, theta)
 
         # small sphere radius
@@ -477,28 +478,26 @@ def rotation_matrix_from_vectors(vec1, vec2):
 
 
 def clip_pointcloud_by_depth(
-    pcd: o3d.geometry.PointCloud, 
-    near_z: float, 
-    far_z: float
+    pcd: o3d.geometry.PointCloud, near_z: float, far_z: float
 ) -> o3d.geometry.PointCloud:
     """
     포인트 클라우드를 depth 범위로 클리핑합니다.
-    
+
     Args:
         pcd: 입력 포인트 클라우드
         near_z: 최소 depth 값
         far_z: 최대 depth 값
-        
+
     Returns:
         클리핑된 포인트 클라우드
     """
     min_bound = pcd.get_min_bound()
     max_bound = pcd.get_max_bound()
-    
+
     # X, Y는 원래 범위 유지, Z만 depth 범위로 제한
     aabb = o3d.geometry.AxisAlignedBoundingBox(
         min_bound=[min_bound[0], min_bound[1], near_z],
         max_bound=[max_bound[0], max_bound[1], far_z],
     )
-    
+
     return pcd.crop(aabb)

@@ -61,6 +61,9 @@ def process_depth_map(
 def read_image(
     path,
     grayscale=False,
+    width=None,
+    height=None,
+    intrinsic_matrix=None,
 ):
     """이미지 또는 PLY 파일을 읽어서 numpy 배열로 반환합니다."""
     path = Path(path)
@@ -69,7 +72,9 @@ def read_image(
     if path.suffix.lower() == ".ply":
         from .pcd_utils import load_ply_as_image
 
-        return load_ply_as_image(path)
+        return load_ply_as_image(
+            path, width=width, height=height, intrinsic_matrix=intrinsic_matrix
+        )
 
     try:
         # TIFF 파일 처리 (32비트 depth map 지원)

@@ -79,6 +79,7 @@ def main():
     # 폴더에서 모든 depth.tif와 texture.png 쌍 찾기
     import glob
     import os
+    import numpy as np
 
     input_dir = config.get("input_dir", "datasets")
 
@@ -89,7 +90,27 @@ def main():
         logger.warning(f"Warning: No *_depth.tif files found in {input_dir}")
         return
 
-    source_image = read_image(template_param.get("path_match_source"))
+    intrinsic_matrix = np.array(
+        [
+            [
+                config.get("camera_intrinsics").get("fx"),
+                0,
+                config.get("camera_intrinsics").get("cx"),
+            ],
+            [
+                0,
+                config.get("camera_intrinsics").get("fy"),
+                config.get("camera_intrinsics").get("cy"),
+            ],
+            [0, 0, 1],
+        ]
+    )
+    source_image = read_image(
+        template_param.get("path_match_source"),
+        width=config.get("image_size").get("width"),
+        height=config.get("image_size").get("height"),
+        intrinsic_matrix=intrinsic_matrix,
+    )
     if source_image is None:
         logger.error(
             f"Source image not found: {template_param.get('path_match_source')}"
