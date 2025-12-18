@@ -900,6 +900,84 @@ class Matcher:
         y = (point[1] - cy) * z / fy
         return np.array([x, y, z])
 
+    def _get_median_xy_from_region(
+        self,
+        pixel_2d: Tuple[int, int],
+        depth_image: np.ndarray,
+        radius: int,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """
+        주변 픽셀들의 3D 좌표에서 X, Y의 median 계산
+
+        Args:
+            pixel_2d: 2D 픽셀 좌표 (u, v)
+            depth_image: depth 이미지
+            radius: 탐색 반경
+
+        Returns:
+            (median_x, median_y) 또는 유효한 픽셀이 없으면 (None, None)
+        """
+        u, v = int(pixel_2d[0]), int(pixel_2d[1])
+        h, w = depth_image.shape[:2]
+
+        # depth 이미지가 3채널인 경우 첫 번째 채널 사용
+        if len(depth_image.shape) == 3:
+            depth_2d = depth_image[:, :, 0]
+        else:
+            depth_2d = depth_image
+
+        xs_3d, ys_3d = [], []
+        for dv in range(max(0, v - radius), min(h, v + radius + 1)):
+            for du in range(max(0, u - radius), min(w, u + radius + 1)):
+                # 원형 마스크 적용
+                dist = np.sqrt((du - u) ** 2 + (dv - v) ** 2)
+                if dist <= radius:
+                    z = depth_2d[dv, du]
+                    if z > 0:  # 유효한 depth만
+                        point_3d = self._backproject_to_3d(np.array([du, dv, z]))
+                        xs_3d.append(point_3d[0])
+                        ys_3d.append(point_3d[1])
+
+        if len(xs_3d) == 0:
+            return None, None
+
+        return float(np.median(xs_3d)), float(np.median(ys_3d))
+
+    def _apply_depth_correction(
+        self,
+        result_2d: np.ndarray,
+        z_depthmap: float,
+        depth_diff: float,
+        target_depth: np.ndarray,
+        point_name: str,
+    ) -> Optional[np.ndarray]:
+        """
+        Depth 차이가 threshold 이상인 경우 보정된 3D 좌표 반환
+
+        Args:
+            result_2d: 2D 픽셀 좌표
+            z_depthmap: depth map에서 읽은 Z값
+            depth_diff: depth 차이 (절대값)
+            target_depth: target depth 이미지
+            point_name: 포인트 이름 (로깅용)
+
+        Returns:
+            보정된 3D 좌표 또는 None (보정 불필요 시)
+        """
+        depth_threshold = self.config.get("depth_correction_threshold", 5.0)
+
+        if depth_diff >= depth_threshold:
+            x, y = self._get_median_xy_from_region(
+                result_2d, target_depth, self.config["point_radius"]
+            )
+            if x is not None and y is not None:
+                self.logger.info(
+                    f"{point_name}: corrected using depth map (diff={depth_diff:.2f}mm)"
+                )
+                return np.array([x, y, z_depthmap])
+
+        return None
+
     def run_pipeline(
         self,
         target_texture: Optional[np.ndarray] = None,
@@ -1107,16 +1185,53 @@ class Matcher:
                 points_3d = [result1_3d, result2_3d, result3_3d]
                 point_names = ["pointL", "pointR", "pointU"]
 
+                depth_diffs = []
                 for point_3d, depth, name in zip(points_3d, z_depthmap, point_names):
-                    depth_diff = abs(point_3d[2] - depth)
-                    if depth_diff > self.config["stable_depth_range"]:
+                    depth_diff = (
+                        point_3d[2] - depth
+                    )  # 부호 포함 (양수: teaching보다 가까움)
+                    depth_diffs.append(depth_diff)
+                    if abs(depth_diff) > self.config["stable_depth_range"]:
                         self.logger.warning(
-                            f"Out of stable depth range {name}: depth difference {depth_diff:.1f}mm > {self.config['stable_depth_range']}mm"
+                            f"Out of stable depth range {name}: depth difference {abs(depth_diff):.1f}mm > {self.config['stable_depth_range']}mm"
                         )
                         return None, None, None, None
                     self.logger.debug(
-                        f"Stable depth range {name}: depth difference {depth_diff:.1f}mm <= {self.config['stable_depth_range']}mm"
+                        f"Stable depth range {name}: depth difference {abs(depth_diff):.1f}mm <= {self.config['stable_depth_range']}mm"
                     )
+
+                # Depth 차이가 threshold 이상인 경우 보정 적용
+                depth_diff_L, depth_diff_R, depth_diff_U = depth_diffs
+
+                corrected = self._apply_depth_correction(
+                    result1_2d,
+                    z_depthmap[0],
+                    abs(depth_diff_L),
+                    target_depth,
+                    "L point",
+                )
+                if corrected is not None:
+                    result1_3d = corrected
+
+                corrected = self._apply_depth_correction(
+                    result2_2d,
+                    z_depthmap[1],
+                    abs(depth_diff_R),
+                    target_depth,
+                    "R point",
+                )
+                if corrected is not None:
+                    result2_3d = corrected
+
+                corrected = self._apply_depth_correction(
+                    result3_2d,
+                    z_depthmap[2],
+                    abs(depth_diff_U),
+                    target_depth,
+                    "U point",
+                )
+                if corrected is not None:
+                    result3_3d = corrected
 
             else:
                 time_start = time.time()
@@ -1250,7 +1365,6 @@ class Matcher:
             3D 매칭 결과 딕셔너리 또는 None
         """
         try:
-
             keypoints0 = filtered_matches["filtered_kpts0"].astype(np.int32)
             keypoints1 = filtered_matches["filtered_kpts1"].astype(np.int32)
 
