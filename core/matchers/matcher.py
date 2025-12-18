@@ -118,7 +118,7 @@ class Matcher:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # 시간 측정을 위한 변수들
- 
+
         self.matching_time = 0.0
 
         # 모델 초기화
@@ -133,9 +133,9 @@ class Matcher:
         self.logger.info(
             f"Model initialization completed (time: {model_init_time:.3f} seconds)"
         )
-        
+
         self._warmup_model()
-        
+
         self.camera = None
 
         self.init_config(config=config, template_param=template_param)
@@ -146,7 +146,7 @@ class Matcher:
     def _warmup_model(self) -> None:
         """
         모델 웜업 수행 (첫 실행 시 느린 문제 해결)
-        
+
         더미 이미지를 사용하여 모델을 한 번 실행하여
         CUDA 커널 초기화, 메모리 할당 등을 미리 수행합니다.
         """
@@ -157,15 +157,15 @@ class Matcher:
             dummy_size = (3, 256, 256)  # (C, H, W)
             dummy_image0 = torch.randn(1, *dummy_size, device=self.device)
             dummy_image1 = torch.randn(1, *dummy_size, device=self.device)
-            
+
             warmup_data = {
                 "image0": dummy_image0,
                 "image1": dummy_image1,
             }
-            
+
             # 웜업 실행
             _ = self.model(warmup_data)
-            
+
             warmup_time = time.time() - warmup_start_time
             self.logger.info(
                 f"Model warmup completed (time: {warmup_time:.3f} seconds)"
@@ -173,7 +173,11 @@ class Matcher:
         except Exception as e:
             self.logger.warning(f"Model warmup failed: {e}")
 
-    def init_config(self, config: Optional[Dict[str, Any]] = None, template_param: Optional[Dict[str, Any]] = None):
+    def init_config(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        template_param: Optional[Dict[str, Any]] = None,
+    ):
         """
         Initialize parameters
 
@@ -184,7 +188,7 @@ class Matcher:
         if config:
             self.default_config.update(config)
         self.config = self.default_config
-        
+
         self.template_param = template_param or None
         if self.config:
             self.logger.info(f"Matcher Parameters: {self.config}")
@@ -489,6 +493,7 @@ class Matcher:
         target_depth: np.ndarray = None,
         source_image: np.ndarray = None,
         plane_normal: np.ndarray = None,
+        transform_matrix: np.ndarray = None,
         result3d: Tuple[np.ndarray, np.ndarray, np.ndarray] = None,
         ransac_result: Optional[Dict[str, Any]] = None,
         camera: Camera = None,
@@ -572,11 +577,21 @@ class Matcher:
             scaledR_3d = get_scaled_point(result2_3d, 1000.0)
             scaledU_3d = get_scaled_point(result3_3d, 1000.0)
 
+            # pcd_raw = copy.deepcopy(pcd)
+            # pcd_raw.scale(1000.0, center=[0, 0, 0])
+            # pcd_raw.transform(transform_matrix)
+
+            # pcd_path = str(self.output_path / f"{result_image_name}_with_transform.ply")
+            # o3d.io.write_point_cloud(
+            #     pcd_path,
+            #     pcd_raw,
+            # )
+            # self.logger.debug(f"PLY file saved: {pcd_path}")
+
             pcd = add_3d_points_to_pcd(pcd, [scaledL_3d, scaledR_3d, scaledU_3d])
-            #scaled_center_point_3d = (scaledL_3d + scaledR_3d + scaledU_3d) / 3
-            #pcd = add_normal_line_to_pcd(pcd, scaled_center_point_3d, plane_normal, line_length=0.1)
-        
-            
+            # scaled_center_point_3d = (scaledL_3d + scaledR_3d + scaledU_3d) / 3
+            # pcd = add_normal_line_to_pcd(pcd, scaled_center_point_3d, plane_normal, line_length=0.1)
+
             pcd.scale(1000.0, center=[0, 0, 0])
 
             pcd_path = str(self.output_path / f"{result_image_name}_with_anchor.ply")
@@ -967,15 +982,16 @@ class Matcher:
                         selected_points[point_name]["z"],
                     ]
                 )
+
             selected_points = self.template_param.get("selected_points", {})
             if selected_points is None:
                 raise Exception("Selected points are not set")
-            result1_3d = get_point_by_config(selected_points, "L")
-            result2_3d = get_point_by_config(selected_points, "R")
-            result3_3d = get_point_by_config(selected_points, "U")
-            plane_normal = compute_plane_normal(result1_3d, result2_3d, result3_3d)
-
-
+            anchor_point1_3d = get_point_by_config(selected_points, "L")
+            anchor_point2_3d = get_point_by_config(selected_points, "R")
+            anchor_point3_3d = get_point_by_config(selected_points, "U")
+            plane_normal = compute_plane_normal(
+                anchor_point1_3d, anchor_point2_3d, anchor_point3_3d
+            )
 
             time_start = time.time()
             matches = self.run_matching(target_clipped, source_image)
@@ -1049,7 +1065,6 @@ class Matcher:
                 if selected_points is None:
                     raise Exception("Selected points are not set")
 
-
                 transform_matrix = result["transformation"]
 
                 # 3D 포인트를 homogeneous coordinate로 변환 (4x1) 후 변환 적용
@@ -1059,27 +1074,27 @@ class Matcher:
                     transformed_homo = transform_4x4 @ point_homo
                     return transformed_homo[:3]
 
-                result1_3d = apply_transform_3d(result1_3d, transform_matrix)
-                result2_3d = apply_transform_3d(result2_3d, transform_matrix)
-                result3_3d = apply_transform_3d(result3_3d, transform_matrix)
+                result1_3d = apply_transform_3d(anchor_point1_3d, transform_matrix)
+                result2_3d = apply_transform_3d(anchor_point2_3d, transform_matrix)
+                result3_3d = apply_transform_3d(anchor_point3_3d, transform_matrix)
 
                 # Project 3D points to 2D and convert to integer coordinates
-                point1_2d = project_3d_point_to_2d(
+                result1_2d = project_3d_point_to_2d(
                     result1_3d, self.camera.get_intrinsic_matrix()
                 ).astype(int)
-                point2_2d = project_3d_point_to_2d(
+                result2_2d = project_3d_point_to_2d(
                     result2_3d, self.camera.get_intrinsic_matrix()
                 ).astype(int)
-                point3_2d = project_3d_point_to_2d(
+                result3_2d = project_3d_point_to_2d(
                     result3_3d, self.camera.get_intrinsic_matrix()
                 ).astype(int)
 
                 z_depthmap = self.calculate_anchor_depth(
                     target_depth_path=target_depth_path,
                     target_depth=target_depth,
-                    point1_2d=point1_2d,
-                    point2_2d=point2_2d,
-                    point3_2d=point3_2d,
+                    point1_2d=result1_2d,
+                    point2_2d=result2_2d,
+                    point3_2d=result3_2d,
                     radius=self.config["point_radius"],
                 )
                 if z_depthmap is None or any(x is None for x in z_depthmap):
@@ -1176,6 +1191,7 @@ class Matcher:
                 self.logger.info("Points information is saved to YAML file.")
 
                 self.visualize_results(
+                    transform_matrix=transform_matrix,
                     target_texture=target_clipped,
                     target_depth=target_depth,
                     source_image=source_image,
@@ -1382,7 +1398,6 @@ class Matcher:
             if pose is None:
                 self.logger.error("Intial pose estimation failed")
                 return None
-
 
             pcd_source_transformed = copy.deepcopy(pcd_source)
 
