@@ -945,8 +945,9 @@ class Matcher:
 
     def _apply_depth_correction(
         self,
+        result_3d: np.ndarray,
         result_2d: np.ndarray,
-        z_depthmap: float,
+        calculated_depth: float,
         depth_diff: float,
         target_depth: np.ndarray,
         point_name: str,
@@ -955,26 +956,45 @@ class Matcher:
         Depth 차이가 threshold 이상인 경우 보정된 3D 좌표 반환
 
         Args:
+            result_3d: 현재 3D 좌표 (X, Y 차이 검증용)
             result_2d: 2D 픽셀 좌표
-            z_depthmap: depth map에서 읽은 Z값
+            calculated_depth: depth map에서 읽은 Z값
             depth_diff: depth 차이 (절대값)
             target_depth: target depth 이미지
             point_name: 포인트 이름 (로깅용)
 
         Returns:
-            보정된 3D 좌표 또는 None (보정 불필요 시)
-        """
-        depth_threshold = self.config.get("depth_correction_threshold", 5.0)
+            보정된 3D 좌표 또는 None (보정 불필요/취소 시)
 
-        if depth_diff >= depth_threshold:
-            x, y = self._get_median_xy_from_region(
+        Config (depth_correction 섹션):
+            min_depth_diff: 보정을 적용할 최소 depth 차이 (기본값: 5.0mm)
+            max_xy_diff: 보정을 취소할 최대 X,Y 차이 (기본값: 5.0mm)
+        """
+        correction_config = self.config.get("depth_correction", {})
+        min_depth_diff = correction_config.get("min_depth_diff", 5.0)
+        max_xy_diff = correction_config.get("max_xy_diff", 20.0)
+
+        if depth_diff >= min_depth_diff:
+            new_x, new_y = self._get_median_xy_from_region(
                 result_2d, target_depth, self.config["point_radius"]
             )
-            if x is not None and y is not None:
+            if new_x is not None and new_y is not None:
+                # X, Y 차이 검증
+                x_diff = abs(new_x - result_3d[0])
+                y_diff = abs(new_y - result_3d[1])
+
+                if x_diff >= max_xy_diff or y_diff >= max_xy_diff:
+                    self.logger.warning(
+                        f"{point_name}: correction cancelled - XY diff too large "
+                        f"(x_diff={x_diff:.2f}mm, y_diff={y_diff:.2f}mm, max={max_xy_diff}mm)"
+                    )
+                    return None
+
                 self.logger.info(
-                    f"{point_name}: corrected using depth map (diff={depth_diff:.2f}mm)"
+                    f"{point_name}: corrected using depth map "
+                    f"(depth_diff={depth_diff:.2f}mm, x_diff={x_diff:.2f}mm, y_diff={y_diff:.2f}mm)"
                 )
-                return np.array([x, y, z_depthmap])
+                return np.array([new_x, new_y, calculated_depth])
 
         return None
 
@@ -1167,7 +1187,7 @@ class Matcher:
                     result3_3d, self.camera.get_intrinsic_matrix()
                 ).astype(int)
 
-                z_depthmap = self.calculate_anchor_depth(
+                calculated_depths = self.calculate_anchor_depth(
                     target_depth_path=target_depth_path,
                     target_depth=target_depth,
                     point1_2d=result1_2d,
@@ -1175,63 +1195,72 @@ class Matcher:
                     point3_2d=result3_2d,
                     radius=self.config["point_radius"],
                 )
-                if z_depthmap is None or any(x is None for x in z_depthmap):
-                    if z_depthmap is not None:
-                        self.logger.error(
-                            f"calculate anchor depth failed: pointL: {z_depthmap[0]}, pointR: {z_depthmap[1]}, pointU: {z_depthmap[2]}"
-                        )
+                # Depth 계산 결과 검증
+                if calculated_depths is None:
+                    self.logger.error("Anchor depth calculation failed: None")
                     return None, None, None, None
-                # Check depth stability for all points
-                points_3d = [result1_3d, result2_3d, result3_3d]
-                point_names = ["pointL", "pointR", "pointU"]
 
-                depth_diffs = []
-                for point_3d, depth, name in zip(points_3d, z_depthmap, point_names):
-                    depth_diff = (
-                        point_3d[2] - depth
-                    )  # 부호 포함 (양수: teaching보다 가까움)
-                    depth_diffs.append(depth_diff)
-                    if abs(depth_diff) > self.config["stable_depth_range"]:
+                if any(d is None for d in calculated_depths):
+                    self.logger.error(
+                        f"Anchor depth calculation failed: "
+                        f"L={calculated_depths[0]}, R={calculated_depths[1]}, U={calculated_depths[2]}"
+                    )
+                    return None, None, None, None
+
+                # 앵커 포인트 데이터 구성
+                anchor_points = [
+                    {
+                        "name": "L",
+                        "pos_3d": result1_3d,
+                        "pos_2d": result1_2d,
+                        "depth": calculated_depths[0],
+                    },
+                    {
+                        "name": "R",
+                        "pos_3d": result2_3d,
+                        "pos_2d": result2_2d,
+                        "depth": calculated_depths[1],
+                    },
+                    {
+                        "name": "U",
+                        "pos_3d": result3_3d,
+                        "pos_2d": result3_2d,
+                        "depth": calculated_depths[2],
+                    },
+                ]
+
+                # Depth 안정성 검사 및 보정 적용
+                stable_range = self.config["stable_depth_range"]
+                for anchor in anchor_points:
+                    depth_diff = abs(anchor["pos_3d"][2] - anchor["depth"])
+
+                    if depth_diff > stable_range:
                         self.logger.warning(
-                            f"Out of stable depth range {name}: depth difference {abs(depth_diff):.1f}mm > {self.config['stable_depth_range']}mm"
+                            f"Out of stable depth range {anchor['name']}: "
+                            f"{depth_diff:.1f}mm > {stable_range}mm"
                         )
                         return None, None, None, None
+
                     self.logger.debug(
-                        f"Stable depth range {name}: depth difference {abs(depth_diff):.1f}mm <= {self.config['stable_depth_range']}mm"
+                        f"Stable depth {anchor['name']}: diff={depth_diff:.1f}mm <= {stable_range}mm"
                     )
 
-                # Depth 차이가 threshold 이상인 경우 보정 적용
-                depth_diff_L, depth_diff_R, depth_diff_U = depth_diffs
+                    # Depth 보정 적용
+                    corrected = self._apply_depth_correction(
+                        anchor["pos_3d"],
+                        anchor["pos_2d"],
+                        anchor["depth"],
+                        depth_diff,
+                        target_depth,
+                        f"{anchor['name']} point",
+                    )
+                    if corrected is not None:
+                        anchor["pos_3d"][:] = corrected
 
-                corrected = self._apply_depth_correction(
-                    result1_2d,
-                    z_depthmap[0],
-                    abs(depth_diff_L),
-                    target_depth,
-                    "L point",
-                )
-                if corrected is not None:
-                    result1_3d = corrected
-
-                corrected = self._apply_depth_correction(
-                    result2_2d,
-                    z_depthmap[1],
-                    abs(depth_diff_R),
-                    target_depth,
-                    "R point",
-                )
-                if corrected is not None:
-                    result2_3d = corrected
-
-                corrected = self._apply_depth_correction(
-                    result3_2d,
-                    z_depthmap[2],
-                    abs(depth_diff_U),
-                    target_depth,
-                    "U point",
-                )
-                if corrected is not None:
-                    result3_3d = corrected
+                # 보정된 좌표 추출
+                result1_3d, result2_3d, result3_3d = [
+                    a["pos_3d"] for a in anchor_points
+                ]
 
             else:
                 time_start = time.time()
