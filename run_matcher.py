@@ -105,15 +105,25 @@ def main():
             [0, 0, 1],
         ]
     )
+    # path_match_source 찾기: template_param 최상위 -> template_param.matching_model -> config.matching_model
+    path_match_source = (
+        template_param.get("path_match_source")
+        or template_param.get("matching_model", {}).get("path_match_source")
+    )
+    
+    if path_match_source is None:
+        logger.error("path_match_source를 찾을 수 없습니다. template_param 또는 config를 확인하세요.")
+        return
+    
     source_image = read_image(
-        template_param.get("path_match_source"),
+        path_match_source,
         width=config.get("image_size").get("width"),
         height=config.get("image_size").get("height"),
         intrinsic_matrix=intrinsic_matrix,
     )
     if source_image is None:
         logger.error(
-            f"Source image not found: {template_param.get('path_match_source')}"
+            f"Source image not found: {path_match_source}"
         )
         return
 
@@ -184,4 +194,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# python run_matcher.py --config_path configs/matcher_config.json
+# python run_matcher.py --config_path configs/MX5_ICE/matcher_config.yaml --template_param_path configs/MX5_ICE/matcher.teac 

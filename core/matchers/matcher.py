@@ -34,7 +34,7 @@ from ..utils.processing_utils import (
     registration_ransac_based_on_correspondence,
     solve_rigid_transform_between_points,
 )
-from ..utils.io_utils import save_points_to_yaml
+from ..utils.io_utils import save_points_to_yaml, create_camera_from_yaml_config, load_photoneo_camera_config
 from ..utils.pcd_utils import (
     create_point_cloud_from_depth_image,
     add_normal_line_to_pcd,
@@ -136,7 +136,8 @@ class Matcher:
 
         self._warmup_model()
 
-        self.camera = None
+        self.camera_target = None
+        self.camera_source = None
 
         self.init_config(config=config, template_param=template_param)
         # Camera 객체 생성 및 이미지 undistortion
@@ -194,20 +195,29 @@ class Matcher:
             self.logger.info(f"Matcher Parameters: {self.config}")
         if self.template_param:
             self.logger.info(f"Template Parameters: {self.template_param}")
-        if "camera_intrinsics" in self.config and "camera_distortions" in self.config:
-            try:
-                from ..utils.io_utils import create_camera_from_yaml_config
 
-                self.camera = create_camera_from_yaml_config(self.config)
-                self.logger.info("Camera created from YAML configuration")
+
+        if self.template_param:
+            try:
+                self.camera_source = create_camera_from_yaml_config(self.template_param)
+                self.logger.info("Camera source template created from YAML configuration")
             except Exception as e:
-                self.logger.error(f"YAML camera configuration load failed: {e}")
+                self.logger.error(f"YAML camera source template configuration load failed: {e}")
                 raise e
         else:
             self.logger.error(
-                "YAML 설정에 camera_intrinsics 또는 camera_distortions가 없습니다."
+                "Camera source template YAML 설정에 camera_intrinsics 또는 camera_distortions가 없습니다."
             )
-            raise ValueError("Camera configuration file not found")
+            raise ValueError("Camera source configuration file not found")
+
+
+        try:
+            self.camera_target = create_camera_from_yaml_config(self.config)
+            self.logger.info("Camera target created from YAML configuration")
+        except Exception as e:
+            self.logger.error(f"YAML camera target configuration load failed: {e}")
+            raise e
+
 
     def scale_keypoints(self, kpts: torch.Tensor, scale: np.ndarray) -> torch.Tensor:
         """
@@ -823,7 +833,7 @@ class Matcher:
             colors = np.asarray(pcd.colors) if pcd.has_colors() else None
 
             # 포인트 클라우드를 depth map으로 변환
-            depth_image = point_cloud_to_depth_map(points, self.camera)
+            depth_image = point_cloud_to_depth_map(points, self.camera_target)
 
             if depth_image is None:
                 self.logger.error("Depth map creation failed")
@@ -885,10 +895,10 @@ class Matcher:
             contrast=self.config["result_image_contrast"],
         )
 
-    def _backproject_to_3d(self, point):
+    def _backproject_to_3d(self, point: np.ndarray, camera: Camera) -> np.ndarray:
         """2D 포인트를 3D로 변환"""
 
-        intrinsic = self.camera.get_intrinsic_matrix()
+        intrinsic = camera.get_intrinsic_matrix()
 
         fx = intrinsic[0, 0]
         fy = intrinsic[1, 1]
@@ -905,6 +915,7 @@ class Matcher:
         pixel_2d: Tuple[int, int],
         depth_image: np.ndarray,
         radius: int,
+        camera: Camera,
     ) -> Tuple[Optional[float], Optional[float]]:
         """
         주변 픽셀들의 3D 좌표에서 X, Y의 median 계산
@@ -934,7 +945,7 @@ class Matcher:
                 if dist <= radius:
                     z = depth_2d[dv, du]
                     if z > 0:  # 유효한 depth만
-                        point_3d = self._backproject_to_3d(np.array([du, dv, z]))
+                        point_3d = self._backproject_to_3d(np.array([du, dv, z]), camera=camera)
                         xs_3d.append(point_3d[0])
                         ys_3d.append(point_3d[1])
 
@@ -972,11 +983,11 @@ class Matcher:
         """
         correction_config = self.config.get("depth_correction", {})
         min_depth_diff = correction_config.get("min_depth_diff", 5.0)
-        max_xy_diff = correction_config.get("max_xy_diff", 20.0)
+        max_xy_diff = correction_config.get("max_xy_diff", 15.0)
 
         if depth_diff >= min_depth_diff:
             new_x, new_y = self._get_median_xy_from_region(
-                result_2d, target_depth, self.config["point_radius"]
+                result_2d, target_depth, self.config["point_radius"], camera=self.camera_target
             )
             if new_x is not None and new_y is not None:
                 # X, Y 차이 검증
@@ -1003,6 +1014,7 @@ class Matcher:
         target_texture: Optional[np.ndarray] = None,
         target_depth: Optional[np.ndarray] = None,
         source_image: Optional[np.ndarray] = None,
+        target_camera_path: Optional[str] = None,
         target_texture_path: Optional[str] = None,
         target_depth_path: Optional[str] = None,
         output_dir: Optional[str] = None,
@@ -1011,9 +1023,10 @@ class Matcher:
         전체 파이프라인 실행
 
         Args:
-            target_texture: Target texture 이미지 (매칭용) - 이미 로드된 이미지
-            target_depth: Target depth 이미지 (depth 계산용) - 이미 로드된 이미지
-            source_image: Source 이미지 - 이미 로드된 이미지
+            target_texture: Target texture 이미지 (매칭용) 
+            target_depth: Target depth 이미지 (depth 계산용) 
+            source_image: Source 이미지
+            target_camera_path: Target camera parameter 경로
             target_texture_path: Target texture 이미지 경로 (debug mode 사용 시 사용)
             target_depth_path: Target depth 이미지 경로 (debug mode 사용 시 사용)
             output_dir: 출력 디렉토리
@@ -1029,6 +1042,7 @@ class Matcher:
 
         self.logger.debug(f"Target texture: {target_texture_path}")
         self.logger.debug(f"Target depth: {target_depth_path}")
+        self.logger.debug(f"Target camera path: {target_camera_path}")
         self.logger.debug(f"Output directory: {output_dir}")
 
         # for output path
@@ -1037,6 +1051,10 @@ class Matcher:
         self.output_path = Path(output_dir)
         if self.config["save_essential"] != "none":
             self.output_path.mkdir(exist_ok=True)
+
+        if target_camera_path is not None:
+            target_camera_config = load_photoneo_camera_config(target_camera_path)
+            self.camera_target = create_camera_from_yaml_config(target_camera_config)
 
         result1_3d = None
         result2_3d = None
@@ -1052,12 +1070,12 @@ class Matcher:
 
         try:
             if self.config["image_undistortion"]:
-                target_depth = self.camera.undistort_image(target_depth)
+                target_depth = self.camera_target.undistort_image(target_depth)
 
             if target_texture is not None:
                 target_image = target_texture
                 if self.config["image_undistortion"]:
-                    target_image = self.camera.undistort_image(target_image)
+                    target_image = self.camera_target.undistort_image(target_image)
                 target_clipped = process_depth_map(
                     depth_image=target_depth,
                     texture_image=target_image,
@@ -1070,7 +1088,7 @@ class Matcher:
                     depth_max=self.config["depth_max"],
                 )
             if self.config["image_undistortion"]:
-                source_image = self.camera.undistort_image(source_image)
+                source_image = self.camera_source.undistort_image(source_image)
 
             def get_point_by_config(selected_points, point_name):
                 return np.array(
@@ -1081,8 +1099,12 @@ class Matcher:
                     ]
                 )
 
-            selected_points = self.template_param.get("selected_points", {})
-            if selected_points is None:
+            # selected_points 찾기: template_param 최상위 -> template_param.matching_model
+            selected_points = (
+                self.template_param.get("selected_points")
+                or self.template_param.get("matching_model", {}).get("selected_points")
+            )
+            if selected_points is None or not selected_points:
                 raise Exception("Selected points are not set")
             anchor_point1_3d = get_point_by_config(selected_points, "L")
             anchor_point2_3d = get_point_by_config(selected_points, "R")
@@ -1150,7 +1172,7 @@ class Matcher:
                 time_start = time.time()
                 source_depth = source_image  # 원본 depth 이미지 사용 (RGB 변환 전)
                 result = self.run_matching_3d(
-                    filtered_matches, target_depth, source_depth
+                    filtered_matches, depth_target=target_depth, depth_source=source_depth
                 )
                 time_end = time.time()
                 self.logger.info(
@@ -1178,13 +1200,13 @@ class Matcher:
 
                 # Project 3D points to 2D and convert to integer coordinates
                 result1_2d = project_3d_point_to_2d(
-                    result1_3d, self.camera.get_intrinsic_matrix()
+                    result1_3d, self.camera_target.get_intrinsic_matrix()
                 ).astype(int)
                 result2_2d = project_3d_point_to_2d(
-                    result2_3d, self.camera.get_intrinsic_matrix()
+                    result2_3d, self.camera_target.get_intrinsic_matrix()
                 ).astype(int)
                 result3_2d = project_3d_point_to_2d(
-                    result3_3d, self.camera.get_intrinsic_matrix()
+                    result3_3d, self.camera_target.get_intrinsic_matrix()
                 ).astype(int)
 
                 calculated_depths = self.calculate_anchor_depth(
@@ -1230,7 +1252,7 @@ class Matcher:
                 ]
 
                 # Depth 안정성 검사 및 보정 적용
-                stable_range = self.config["stable_depth_range"]
+                stable_range = self.config.get("stable_depth_range", 50.0)
                 for anchor in anchor_points:
                     depth_diff = abs(anchor["pos_3d"][2] - anchor["depth"])
 
@@ -1246,16 +1268,18 @@ class Matcher:
                     )
 
                     # Depth 보정 적용
-                    corrected = self._apply_depth_correction(
-                        anchor["pos_3d"],
-                        anchor["pos_2d"],
-                        anchor["depth"],
-                        depth_diff,
-                        target_depth,
-                        f"{anchor['name']} point",
-                    )
-                    if corrected is not None:
-                        anchor["pos_3d"][:] = corrected
+                    depth_correction = self.config.get("depth_correction", {})
+                    if depth_correction and depth_correction.get("enabled", True):
+                        corrected = self._apply_depth_correction(
+                            anchor["pos_3d"],
+                            anchor["pos_2d"],
+                            anchor["depth"],
+                            depth_diff,
+                            target_depth,
+                            f"{anchor['name']} point",
+                        )
+                        if corrected is not None:
+                            anchor["pos_3d"][:] = corrected
 
                 # 보정된 좌표 추출
                 result1_3d, result2_3d, result3_3d = [
@@ -1299,6 +1323,7 @@ class Matcher:
                     np.array([result1_2d[0], result1_2d[1], z1]),
                     np.array([result2_2d[0], result2_2d[1], z2]),
                     np.array([result3_2d[0], result3_2d[1], z3]),
+                    camera=self.camera_target,
                 )
                 time_end = time.time()
                 self.logger.info(
@@ -1342,7 +1367,7 @@ class Matcher:
                     plane_normal=plane_normal,
                     result3d=result_3d_points,
                     ransac_result=filtered_matches,
-                    camera=self.camera,
+                    camera=self.camera_target,
                     result_image_name=self.target_texture_name,
                 )
 
@@ -1354,7 +1379,7 @@ class Matcher:
             raise Exception(f"{e}")
 
     def calculate_3d_points(
-        self, result1_3d: np.ndarray, result2_3d: np.ndarray, result3_3d: np.ndarray
+        self, result1_3d: np.ndarray, result2_3d: np.ndarray, result3_3d: np.ndarray, camera: Camera
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         2D 좌표와 깊이 정보를 이용하여 3D 포인트를 계산합니다.
@@ -1370,9 +1395,9 @@ class Matcher:
                 - backprojected2_3d: Point R의 역투영된 3D 좌표
                 - backprojected3_3d: Point U의 역투영된 3D 좌표
         """
-        backprojected1_3d = self._backproject_to_3d(result1_3d)
-        backprojected2_3d = self._backproject_to_3d(result2_3d)
-        backprojected3_3d = self._backproject_to_3d(result3_3d)
+        backprojected1_3d = self._backproject_to_3d(result1_3d, camera=camera)
+        backprojected2_3d = self._backproject_to_3d(result2_3d, camera=camera)
+        backprojected3_3d = self._backproject_to_3d(result3_3d, camera=camera)
 
         return backprojected1_3d, backprojected2_3d, backprojected3_3d
 
@@ -1394,8 +1419,8 @@ class Matcher:
             3D 매칭 결과 딕셔너리 또는 None
         """
         try:
-            keypoints0 = filtered_matches["filtered_kpts0"].astype(np.int32)
-            keypoints1 = filtered_matches["filtered_kpts1"].astype(np.int32)
+            keypoints_target = filtered_matches["filtered_kpts0"].astype(np.int32)
+            keypoints_source = filtered_matches["filtered_kpts1"].astype(np.int32)
 
             valid_indices = []
             points_3d_target = []
@@ -1416,7 +1441,7 @@ class Matcher:
             else:
                 depth_source_2d = depth_source
 
-            for i, (pt0, pt1) in enumerate(zip(keypoints0, keypoints1)):
+            for i, (pt0, pt1) in enumerate(zip(keypoints_target, keypoints_source)):
                 x0, y0 = int(pt0[0]), int(pt0[1])
                 x1, y1 = int(pt1[0]), int(pt1[1])
 
@@ -1437,11 +1462,12 @@ class Matcher:
                     z0 = d0
                     z1 = d1
 
-                    x3d_0 = (x0 - self.camera.K[0, 2]) * z0 / self.camera.K[0, 0]
-                    y3d_0 = (y0 - self.camera.K[1, 2]) * z0 / self.camera.K[1, 1]
+                    x3d_0 = (x0 - self.camera_target.K[0, 2]) * z0 / self.camera_target.K[0, 0]
+                    y3d_0 = (y0 - self.camera_target.K[1, 2]) * z0 / self.camera_target.K[1, 1]
 
-                    x3d_1 = (x1 - self.camera.K[0, 2]) * z1 / self.camera.K[0, 0]
-                    y3d_1 = (y1 - self.camera.K[1, 2]) * z1 / self.camera.K[1, 1]
+                    # intrinsic matrix of source camera is used only for 3d matching
+                    x3d_1 = (x1 - self.camera_source.K[0, 2]) * z1 / self.camera_source.K[0, 0]
+                    y3d_1 = (y1 - self.camera_source.K[1, 2]) * z1 / self.camera_source.K[1, 1]
 
                     points_3d_target.append([x3d_0, y3d_0, z0])
                     points_3d_source.append([x3d_1, y3d_1, z1])
@@ -1452,7 +1478,7 @@ class Matcher:
 
             # 통계 정보 로깅
             self.logger.debug(f"Point processing stats:")
-            self.logger.debug(f"  - Total points: {len(keypoints0)}")
+            self.logger.debug(f"  - Total points: {len(keypoints_target)}")
             self.logger.debug(f"  - Valid 3D points: {valid_count}")
 
             if len(points_3d_target) < 4:
@@ -1545,118 +1571,9 @@ class Matcher:
             pcd_source_transformed = copy.deepcopy(pcd_source)
 
             pcd_source_transformed.transform(pose)
-            # 색상 설정 (시각화용)
-            # pcd_target.paint_uniform_color([1, 0, 0])  # 빨간색 (target)
-            # pcd_source.paint_uniform_color([0, 1, 0])  # 초록색 (source)
-            # pcd_source_transformed.paint_uniform_color([0, 0, 1])  # 파란색 (source transformed)
-
-            # 두 point cloud 합치기
-
-            # combined_pcd = pcd0 + pcd1_transformed
-
-            # # 저장
-            # output_path = Path(self.config.get("output_dir", "output"))
-            # output_path.mkdir(exist_ok=True)
-
-            # # 파일명 생성
-            # pcd_filename_transformed = f"{self.target_texture_name}_pcd_before_icp_transformed_source.ply"
-            # pcd_filename_target = f"{self.target_texture_name}_pcd_before_icp_target.ply"
-            # pcd_filename_source = f"{self.target_texture_name}_pcd_before_icp_source.ply"
-            # pcd_path_transformed = output_path / pcd_filename_transformed
-            # pcd_path_target = output_path / pcd_filename_target
-            # pcd_path_source = output_path / pcd_filename_source
-
-            # # Before ICP 저장 (원본 상태)
-            # o3d.io.write_point_cloud(str(pcd_path_transformed), pcd_source_transformed.paint_uniform_color([0, 0, 1]))
-            # self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_transformed}")
-            # o3d.io.write_point_cloud(str(pcd_path_target), pcd_target.paint_uniform_color([1, 0, 0]))
-            # self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_target}")
-            # o3d.io.write_point_cloud(str(pcd_path_source), pcd_source.paint_uniform_color([0, 1, 0]))
-            # self.logger.info(f"Combined point cloud (before ICP) saved: {pcd_path_source}")
-
-            # # 아웃라이어 제거 (ICP 전 전처리)
-            # statistical_nb_neighbors = 20
-            # statistical_std_ratio = 3.0
-            # pcd_source_clean, _ = pcd_source.remove_statistical_outlier(
-            #     nb_neighbors=statistical_nb_neighbors, std_ratio=statistical_std_ratio)
-            # pcd_target_clean, _ = pcd_target.remove_statistical_outlier(
-            #     nb_neighbors=statistical_nb_neighbors, std_ratio=statistical_std_ratio)
-
-            # # 아웃라이어 제거된 point cloud로 변환된 버전 생성
-            # pcd_source_transformed_clean = copy.deepcopy(pcd_source_clean)
-            # pcd_source_transformed_clean.transform(pose)
-
-            # if not pcd_target_clean.has_normals():
-            #     pcd_target_clean.estimate_normals(
-            #         o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-
-            # if not pcd_source_transformed_clean.has_normals():
-            #     pcd_source_transformed_clean.estimate_normals(
-            #         o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-
-            # # Multi-stage ICP (점진적 정밀도 향상)
-            # icp_stages = [
-            #     {"max_correspondence_distance": 0.1, "max_iteration": 1000, "relative_fitness": 1e-4, "relative_rmse": 1e-4},  # Stage 1: 관대한 설정
-            #     {"max_correspondence_distance": 0.05, "max_iteration": 1000, "relative_fitness": 1e-5, "relative_rmse": 1e-5},  # Stage 2: 중간 설정
-            #     {"max_correspondence_distance": 0.02, "max_iteration": 2000, "relative_fitness": 1e-6, "relative_rmse": 1e-6},  # Stage 3: 정밀한 설정
-            # ]
-
-            # current_pose = np.eye(4)
-            # result = None
-
-            # for stage_idx, stage_params in enumerate(icp_stages):
-            #     self.logger.info(f"ICP Stage {stage_idx + 1}: max_correspondence_distance={stage_params['max_correspondence_distance']}")
-
-            #     stage_result = o3d.pipelines.registration.registration_icp(
-            #         pcd_source_transformed_clean, pcd_target_clean,
-            #         max_correspondence_distance=stage_params["max_correspondence_distance"],
-            #         init=current_pose,
-            #         estimation_method=o3d.pipelines.registration.TransformationEstimationForGeneralizedICP(),
-            #         criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
-            #             relative_fitness=stage_params["relative_fitness"],
-            #             relative_rmse=stage_params["relative_rmse"],
-            #             max_iteration=stage_params["max_iteration"]
-            #         )
-            #     )
-
-            #     self.logger.info(f"Stage {stage_idx + 1} Result - Fitness: {stage_result.fitness:.4f}, RMSE: {stage_result.inlier_rmse:.4f}")
-
-            #     # 다음 stage를 위한 pose 업데이트
-            #     current_pose = stage_result.transformation
-            #     result = stage_result  # 최종 결과 저장
-
-            #     # 조기 종료 조건 (충분히 좋은 결과)
-            #     if stage_result.fitness > 0.8:
-            #         self.logger.info(f"Early termination at stage {stage_idx + 1} due to high fitness")
-            #         break
-            # # result = o3d.pipelines.registration.registration_icp(
-            # #         pcd_target, pcd_target, 0.01, pose,
-            # #         o3d.pipelines.registration.TransformationEstimationPointToPlane())
-            # self.logger.info(f"GICP Result - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
-            # self.logger.info(f"GICP converged: {result.fitness > 0.1}")  # fitness > 0.1이면 성공으로 간주
-
-            # # Multi-stage ICP 결과를 원본 source point cloud에 적용
-            # pcd_source_transformed2 = copy.deepcopy(pcd_source_clean)
-            # # 초기 pose + ICP 결과를 결합
-            # final_transformation = result.transformation @ pose
-            # pcd_source_transformed2.transform(final_transformation)
-            # pcd_source_transformed2.paint_uniform_color([0, 1, 1])  #
-
-            # # 변환된 point cloud 저장
-            # pcd_filename_transformed = f"{self.target_texture_name}_pcd_after_icp_transformed_source.ply"
-            # pcd_path_transformed = output_path / pcd_filename_transformed
-            # o3d.io.write_point_cloud(str(pcd_path_transformed), pcd_source_transformed2)
-            # self.logger.info(f"Combined point cloud (after ICP) saved: {pcd_path_transformed}")
 
             # 8. 결과 반환
             return {
-                # "fundamental_matrix": F,
-                # "essential_matrix": E,
-                # "points_3d_target": points_3d_target,
-                # "points_3d_source": points_3d_source,
-                # "gicp_result": result,
-                # "fitness": result.fitness,
-                # "rmse": result.inlier_rmse,
                 "transformation": pose
             }
 
@@ -1675,10 +1592,14 @@ class Matcher:
             self.model = None
 
         # 2. 카메라 객체 정리
-        if hasattr(self, "camera") and self.camera is not None:
+        if hasattr(self, "camera_target") and self.camera_target is not None:
             self.logger.debug("Camera object cleanup in progress...")
-            del self.camera
-            self.camera = None
+            del self.camera_target
+            self.camera_target = None
+        if hasattr(self, "camera_source") and self.camera_source is not None:
+            self.logger.debug("Camera object cleanup in progress...")
+            del self.camera_source
+            self.camera_source = None
 
         # 3. 설정 정리
         if hasattr(self, "config"):
