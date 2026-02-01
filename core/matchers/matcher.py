@@ -1273,6 +1273,9 @@ class Matcher:
                     )
 
                     # Depth 보정 적용
+
+                    if anchor["name"] == "U": continue
+                    
                     depth_correction = self.config.get("depth_correction", {})
                     if depth_correction and depth_correction.get("enabled", True):
                         corrected = self._apply_depth_correction(
