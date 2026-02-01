@@ -1,0 +1,59 @@
+  input_dir: "datasets/NX4_0127/"
+  output_dir: "output/NX4_0127"
+  # 매칭 파라미터 (와이드 이미지용 조정)
+  max_keypoints: 3000
+
+  geometry_type: "Homography"
+  ransac_method: "CV2_USAC_MAGSAC"
+  ransac_reproj_threshold: 13.0  
+  ransac_max_iter: 20000
+  ransac_confidence: 0.9999
+  debug_mode: false
+
+  save_essential: "all"  # all, 2d, 3d, none
+
+  depth_max: 2500.0
+
+  enable_3d_matching: true
+
+  stable_depth_range: 50.0 # +-50.0mm
+
+  depth_correction:
+    enabled: true
+    min_depth_diff: 5.0
+    max_xy_diff: 20.0
+
+  pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
+
+  result_image_contrast: 5.0
+  # 3D RANSAC 파라미터
+  ransac_3d:
+    max_correspondence_distance: 0.8
+    ransac_n: 7
+    max_iterations: 2600
+    confidence: 0.9999
+
+  point_radius: 25
+
+  camera_intrinsics:   
+    fx: 2320.1113393328706   
+    fy: 2320.3249669909296   
+    cx: 1020.9667575368462   
+    cy: 721.5296868755295 
+  camera_distortions:   
+    k1: -0.23691571827746347   
+    k2: 0.18485668869694924   
+    p1: 0.0006974096202867402   
+    p2: -0.0008940189418357964   
+    k3: -0.11234667492280082
+
+  image_size:
+    width: 2064
+    height: 1544
+
+
+  roi_2d_src: [800, 100, 2064, 1400] # [x1, y1, x2, y2]
+
+  image_undistortion: false
+
+

@@ -3,7 +3,7 @@
 이미지 Undistortion 스크립트
 
 사용법:
-    python undistort_image.py --config_path configs/matcher_3d_wide_config.yaml
+    python undistort_image.py --config_path configs/NX4_OB/matcher_config.yaml
 """
 
 import argparse

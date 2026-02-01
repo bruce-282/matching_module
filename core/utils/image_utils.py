@@ -101,7 +101,17 @@ def read_image(
         # 일반 이미지 파일 처리
         else:
             mode = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
-            image = cv2.imread(str(path), mode)
+            path_str = str(path)
+            # Windows 한글/유니코드 경로: cv2.imread는 실패·경고 발생 → 바이트로 읽고 imdecode만 사용
+            if not path_str.isascii():
+                try:
+                    with open(path, "rb") as f:
+                        buf = np.frombuffer(f.read(), dtype=np.uint8)
+                    image = cv2.imdecode(buf, mode)
+                except Exception as e:
+                    raise ValueError(f"Cannot read image {path}. Error: {e}")
+            else:
+                image = cv2.imread(path_str, mode)
             if image is None:
                 raise ValueError(f"Cannot read image {path}.")
             if not grayscale and len(image.shape) == 3:

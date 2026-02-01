@@ -197,7 +197,7 @@ class Matcher:
             self.logger.info(f"Template Parameters: {self.template_param}")
 
 
-        if self.template_param:
+        if self.template_param and "camera_intrinsics" in self.template_param and "camera_distortions" in self.template_param:
             try:
                 self.camera_source = create_camera_from_yaml_config(self.template_param)
                 self.logger.info("Camera source template created from YAML configuration")
@@ -210,13 +210,18 @@ class Matcher:
             )
             raise ValueError("Camera source configuration file not found")
 
-
-        try:
-            self.camera_target = create_camera_from_yaml_config(self.config)
-            self.logger.info("Camera target created from YAML configuration")
-        except Exception as e:
-            self.logger.error(f"YAML camera target configuration load failed: {e}")
-            raise e
+        if "camera_intrinsics" in self.config and "camera_distortions" in self.config:
+            try:
+                self.camera_target = create_camera_from_yaml_config(self.config)
+                self.logger.info("Camera target created from YAML configuration")
+            except Exception as e:
+                self.logger.error(f"YAML camera target configuration load failed: {e}")
+                raise e
+        else:
+            self.logger.error(
+                "Camera target YAML 설정에 camera_intrinsics 또는 camera_distortions가 없습니다."
+            )
+            raise ValueError("Camera target configuration file not found")
 
 
     def scale_keypoints(self, kpts: torch.Tensor, scale: np.ndarray) -> torch.Tensor:

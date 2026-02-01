@@ -22,6 +22,16 @@ from core.matchers.matcher import Matcher
 from core.utils.image_utils import read_image
 
 
+def collect_subfolders_with_depth(root: Path):
+    """root 아래에서 *_depth.tif가 하나라도 있는 디렉터리만 수집 (중복 없이)."""
+    seen = set()
+    root = root.resolve()
+    for path in root.rglob("*_depth.tif"):
+        if path.is_file():
+            seen.add(path.parent)
+    return sorted(seen)
+
+
 def main():
     """메인 함수"""
 
@@ -37,6 +47,17 @@ def main():
         type=str,
         required=True,
         help="Template parameter file path (YAML)",
+    )
+    parser.add_argument(
+        "--input_folder",
+        type=str,
+        default=None,
+        help="상위 입력 폴더. 지정 시 --batch와 함께 사용해 하위 폴더를 탐색합니다 (config input_dir override).",
+    )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="--input_folder 지정 시, 하위 폴더를 재귀 탐색하여 *_depth.tif가 있는 폴더마다 매칭 실행.",
     )
 
     args = parser.parse_args()
@@ -81,14 +102,23 @@ def main():
     import os
     import numpy as np
 
-    input_dir = config.get("input_dir", "datasets")
+    # 배치 모드: 상위 폴더 지정 시 하위 폴더 탐색
+    input_root = Path(args.input_folder) if args.input_folder else Path(config.get("input_dir", "datasets"))
+    input_root = input_root.resolve()
+    base_output_dir = config.get("output_dir", "output")
 
-    # 입력 폴더에서 모든 depth.tif 파일 찾기
-    depth_files = glob.glob(os.path.join(input_dir, "*_depth.tif"))
-
-    if not depth_files:
-        logger.warning(f"Warning: No *_depth.tif files found in {input_dir}")
-        return
+    if args.batch:
+        subfolders = collect_subfolders_with_depth(input_root)
+        if not subfolders:
+            logger.warning(f"No subfolders with *_depth.tif found under {input_root}")
+            return
+        logger.info(f"Batch mode: {len(subfolders)} subfolders to process under {input_root}")
+        input_dirs_and_outputs = [
+            (str(sf), str(Path(base_output_dir) / sf.relative_to(input_root)))
+            for sf in subfolders
+        ]
+    else:
+        input_dirs_and_outputs = [(str(input_root), base_output_dir)]
 
     intrinsic_matrix = np.array(
         [
@@ -127,64 +157,58 @@ def main():
         )
         return
 
-    for depth_file in depth_files:
-        # Extract folder name from file name
-        base_name = os.path.basename(depth_file).replace("_depth.tif", "")
-        texture_file = os.path.join(input_dir, f"{base_name}_texture.png")
-
-        logger.info(f"Depth file: {depth_file}")
-        logger.info(f"Texture file: {texture_file}")
-
-        # Check if texture file exists
-        if not os.path.exists(texture_file):
-            logger.warning(f"Warning: {texture_file} file not found. Skipping.")
+    for input_dir, output_dir in input_dirs_and_outputs:
+        depth_files = glob.glob(os.path.join(input_dir, "*_depth.tif"))
+        if not depth_files:
+            logger.warning(f"No *_depth.tif in {input_dir}, skipping.")
             continue
 
-        # 각 쌍에 대해 별도 출력 디렉토리 생성
-        output_dir = config.get("output_dir", "output")
         os.makedirs(output_dir, exist_ok=True)
-        logger.info(f"   output_dir: {output_dir}")
+        logger.info(f"Input dir: {input_dir} -> output_dir: {output_dir}")
 
-        try:
-            # 이미지 미리 로드 (undistortion 제외)
-            logger.info(f"Loading images...")
-            target_texture = read_image(texture_file)
-            target_depth = read_image(depth_file)
+        for depth_file in depth_files:
+            # Extract folder name from file name
+            base_name = os.path.basename(depth_file).replace("_depth.tif", "")
+            texture_file = os.path.join(input_dir, f"{base_name}_texture.png")
 
-            # logger.info(
-            #     f"     target_texture shape/dtype: {target_texture.shape, target_texture.dtype}"
-            # )
-            # logger.info(
-            #     f"     target_depth shape/dtype: {target_depth.shape, target_depth.dtype}"
-            # )
-            # logger.info(
-            #     f"     source_image shape/dtype: {source_image.shape, source_image.dtype}"
-            # )
+            logger.info(f"Depth file: {depth_file}")
+            logger.info(f"Texture file: {texture_file}")
 
-            time_start = time.time()
-            result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(
-                target_texture=target_texture,
-                target_depth=target_depth,
-                source_image=source_image,
-                target_texture_path=texture_file,
-                target_depth_path=depth_file,
-                output_dir=output_dir,
-            )
-            time_end = time.time()
-            logger.info(f"Total matching time: {time_end - time_start:.3f} seconds")
-        except Exception as e:
-            logger.error(f"{base_name} - {e}")
-            continue
+            # Check if texture file exists
+            if not os.path.exists(texture_file):
+                logger.warning(f"Warning: {texture_file} file not found. Skipping.")
+                continue
 
-        # 결과 출력
-        if all(
-            x is not None for x in [result1_3d, result2_3d, result3_3d, plane_normal]
-        ):
-            logger.info(
-                f"Matching success - {base_name} \n Point L: {result1_3d} \n Point R: {result2_3d} \n Point U: {result3_3d} \n Plane Normal: {plane_normal}"
-            )
-        else:
-            logger.error(f"❌ Matching failed - {base_name}")
+            try:
+                # 이미지 미리 로드 (undistortion 제외)
+                logger.info(f"Loading images...")
+                target_texture = read_image(texture_file)
+                target_depth = read_image(depth_file)
+
+                time_start = time.time()
+                result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(
+                    target_texture=target_texture,
+                    target_depth=target_depth,
+                    source_image=source_image,
+                    target_texture_path=texture_file,
+                    target_depth_path=depth_file,
+                    output_dir=output_dir,
+                )
+                time_end = time.time()
+                logger.info(f"Total matching time: {time_end - time_start:.3f} seconds")
+            except Exception as e:
+                logger.error(f"{base_name} - {e}")
+                continue
+
+            # 결과 출력
+            if all(
+                x is not None for x in [result1_3d, result2_3d, result3_3d, plane_normal]
+            ):
+                logger.info(
+                    f"Matching success - {base_name} \n Point L: {result1_3d} \n Point R: {result2_3d} \n Point U: {result3_3d} \n Plane Normal: {plane_normal}"
+                )
+            else:
+                logger.error(f"❌ Matching failed - {base_name}")
 
     # 메모리 정리
     matcher.cleanup()
