@@ -75,7 +75,7 @@ def main():
 
     try:
         with open(args.template_param_path, "r", encoding="utf-8") as f:
-            template_param = yaml.safe_load(f)
+            template_param = yaml.safe_load(f)["matching_model"]
     except FileNotFoundError:
         print(f"Template parameter file not found: {args.template_param_path}")
         return

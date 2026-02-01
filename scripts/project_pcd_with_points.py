@@ -441,3 +441,5 @@ def main():
 if __name__ == "__main__":
     main()
 
+# python scripts/project_pcd_with_points.py --input_folder datasets\NX4_0127 --output output_NX4_0127 --batch --camera_config  configs/NX4/matcher_config.yaml --input_folder datasets/NX4_0127 --batch
+# 
