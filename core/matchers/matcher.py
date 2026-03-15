@@ -1753,6 +1753,15 @@ class Matcher:
                 self.logger.warning(f"Chamfer distance failed: {cd_e}")
                 cd = None
 
+            # Identity pose 또는 chamfer=0이면 실패 처리 (변환/저장 스킵)
+            is_identity = np.allclose(pose[:3, :3], np.eye(3), atol=1e-5) and np.linalg.norm(pose[:3, 3]) < 1e-5
+            is_zero_chamfer = cd is not None and cd < 1e-6
+            if is_identity or is_zero_chamfer:
+                self.logger.error(
+                    f"3D matching rejected: pose is identity={is_identity}, chamfer≈0={is_zero_chamfer}"
+                )
+                return None
+
             # 3D correspondence 시각화 (REF=target, SRC=source)
             if self.config.get("save_essential") in ("all", "3d"):
                 try:
