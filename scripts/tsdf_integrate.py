@@ -103,6 +103,20 @@ def load_pose_from_yaml(yaml_path: str, pose_scale: float = 1.0) -> np.ndarray:
     return T
 
 
+def save_poses_yaml(camera_names: list, poses_list: list, out_path: str) -> None:
+    """TSDF 통합에 사용한 카메라 이름·포즈를 한 YAML로 저장. 포즈는 이미 meter 단위."""
+    data = {
+        "reference": camera_names[0] if camera_names else "",
+        "poses_meter": True,
+        "cameras": [
+            {"name": name, "transformation": T.tolist()}
+            for name, T in zip(camera_names, poses_list)
+        ],
+    }
+    with open(out_path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
+
 def parse_result_basenames(result_dir: str) -> list:
     """*_result.yaml 파일에서 (base, target, source, yaml_path) 추출.
     base_name 형식: {target_stem}_{source_stem} (예: 5_cp_6_cp, 2_cp_5_cp)
@@ -332,6 +346,7 @@ def main():
     rgbd_list = []
     intrinsics_list = []
     poses_list = []
+    camera_names = []
 
     # Frame 0: reference (identity)
     ref_ply = ply_dir / f"{ref}.ply"
@@ -345,6 +360,7 @@ def main():
     rgbd_list.append(rgbd)
     intrinsics_list.append(intrinsic)
     poses_list.append(np.eye(4))
+    camera_names.append(ref)
     print(f"Frame 0 (reference): {ref}")
 
     # Frames 1..: source with pose from YAML
@@ -363,6 +379,7 @@ def main():
         rgbd_list.append(rgbd)
         intrinsics_list.append(intrinsic)
         poses_list.append(T)
+        camera_names.append(source)
         print(f"Frame {len(poses_list) - 1}: {source} (pose from {Path(yaml_path).name})")
 
     if len(rgbd_list) < 2:
@@ -379,6 +396,11 @@ def main():
         mesh, pcd, output_dir, args.output_name,
         flip_yz=not args.no_flip_yz,
     )
+
+    # 통합에 사용한 포즈를 한 번에 YAML로 저장 (rerun_viewer 등에서 동일 포즈 사용)
+    poses_yaml_path = Path(output_dir) / f"{args.output_name}_poses.yaml"
+    save_poses_yaml(camera_names, poses_list, str(poses_yaml_path))
+    print(f"[INFO] Poses saved: {poses_yaml_path}")
     return 0
 
 

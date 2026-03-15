@@ -55,3 +55,4 @@ python scripts/tsdf_integrate.py \
 
 echo ""
 echo "TSDF 결과: $OUTPUT/5_cp_fused_mesh.ply, 5_cp_fused_pcd.ply"
+echo "뷰어: bash datasets/SL_ch_260315/run_rerun_viewer.sh"
