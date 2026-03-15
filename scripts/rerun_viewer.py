@@ -287,8 +287,11 @@ class RerunViewer:
         image_size: tuple[int, int],
         depth_min: float = 0.01,
         depth_max: float = 10.0,
-    ) -> np.ndarray:
-        """월드(기준) 좌표 포인트를 해당 카메라 상대포즈로 옮긴 뒤 2D (u,v)로 투영. 이미지 안·앞쪽만."""
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """월드(기준) 좌표 포인트를 해당 카메라 상대포즈로 옮긴 뒤 2D (u,v)로 투영.
+        Returns:
+            (uv, valid_mask): uv는 전체 포인트의 (u,v), valid_mask는 이미지 안·앞쪽 bool mask.
+        """
         R = T_world_from_cam[:3, :3]
         t = T_world_from_cam[:3, 3]
         # 월드 -> 해당 카메라: P_cam = R.T @ (P_world - t)
@@ -302,7 +305,7 @@ class RerunViewer:
         v = fy * pts_cam[:, 1] / depth + cy
         valid &= (u >= 0) & (u < w) & (v >= 0) & (v < h)
         uv = np.stack([u, v], axis=1)
-        return uv[valid]
+        return uv, valid
 
     def log_camera_frames_with_images(
         self,
@@ -330,19 +333,26 @@ class RerunViewer:
         K = np.array([[f, 0, cx], [0, f, cy], [0, 0, 1]])
         image_size = (w, h)
 
-        # FIX: fused_pcd는 save_reconstruction에서 flip_yz 적용된 채로 저장됨.
-        # pose(YAML)는 원본 좌표계 기준이므로, projection 시에는 flip을 되돌려서
-        # 원본 좌표계로 복원해야 pose와 좌표계가 일치함.
+        # fused_pcd는 save_reconstruction에서 flip_yz가 적용된 상태로 저장됨 (Y,Z 반전).
+        # poses_yaml은 원본 좌표계(flip 전) 기준으로 저장됨.
+        # pinhole projection은 Z-forward(양수)를 가정하므로, fused_pcd를 un-flip해서
+        # 원본 좌표계로 복원한 뒤 projection해야 함. (flip은 self-inverse)
         points_world_proj = None
+        colors_world_proj = None
         if fused_pcd_path and Path(fused_pcd_path).exists() and o3d is not None:
             pcd = o3d.io.read_point_cloud(str(fused_pcd_path))
             if pcd.has_points():
                 pts = np.asarray(pcd.points, dtype=np.float64)
+                # un-flip: 저장 시 적용된 flip_yz를 되돌림 (flip은 self-inverse)
                 if flip_yz:
-                    # 저장 시 flip이 적용되었으므로 역변환 (flip은 self-inverse)
-                    un_flip = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]], dtype=np.float64)
-                    pts = pts @ un_flip.T
+                    F = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]], dtype=np.float64)
+                    pts = pts @ F.T
                 points_world_proj = pts[::points_subsample].copy()
+                if pcd.has_colors():
+                    colors_world_proj = (np.asarray(pcd.colors) * 255).astype(np.uint8)[::points_subsample]
+                print(f"[INFO] Projection source: fused_pcd (un-flipped), "
+                      f"{len(points_world_proj)} points, "
+                      f"z=[{points_world_proj[:,2].min():.3f}, {points_world_proj[:,2].max():.3f}]")
 
         for i, name in enumerate(camera_names):
             if hasattr(rr, "set_time_sequence"):
@@ -361,29 +371,26 @@ class RerunViewer:
             )
             rr.log(camera_image_path, rr.Image(color_image))
 
-            # projection: fused_pcd(un-flip → 기준 프레임 좌표계) → 해당 카메라 좌표계 → 2D
+            # projection: world 포인트 → 해당 카메라 좌표계 → 2D (+ 원본 색상)
             if points_world_proj is not None and i < len(camera_poses):
                 T = camera_poses[i]
-                R = T[:3, :3]
-                t = T[:3, 3]
 
-                # --- DEBUG ---
-                print(f"\n[DEBUG] === Camera: {name} ===")
-                print(f"[DEBUG] Pose t: [{t[0]:.4f}, {t[1]:.4f}, {t[2]:.4f}]")
-                print(f"[DEBUG] Is identity: {np.allclose(T, np.eye(4), atol=1e-6)}")
-                print(f"[DEBUG] Points (un-flipped) range: "
-                      f"x=[{points_world_proj[:,0].min():.3f}, {points_world_proj[:,0].max():.3f}] "
-                      f"y=[{points_world_proj[:,1].min():.3f}, {points_world_proj[:,1].max():.3f}] "
-                      f"z=[{points_world_proj[:,2].min():.3f}, {points_world_proj[:,2].max():.3f}]")
+                uv_all, valid_mask = self._world_to_image_2d(points_world_proj, T, K, image_size)
+                uv = uv_all[valid_mask]
+                n_valid = len(uv)
 
-                uv = self._world_to_image_2d(points_world_proj, T, K, image_size)
-                print(f"[DEBUG] Valid UV count: {len(uv)}")
-                if len(uv) > 0:
-                    print(f"[DEBUG] UV range: u=[{uv[:,0].min():.1f}, {uv[:,0].max():.1f}] "
-                          f"v=[{uv[:,1].min():.1f}, {uv[:,1].max():.1f}]")
-                    rr.log(camera_image_path, rr.Points2D(positions=uv.astype(np.float32), radii=2.0))
-                else:
-                    print(f"[DEBUG] WARNING: 0 valid points projected for {name}!")
+                print(f"[DEBUG] {name}: {n_valid} valid points projected")
+
+                if n_valid > 0:
+                    # 원본 PLY 색상이 있으면 함께 로깅
+                    pt_colors = None
+                    if colors_world_proj is not None:
+                        pt_colors = colors_world_proj[valid_mask]
+                    rr.log(camera_image_path, rr.Points2D(
+                        positions=uv.astype(np.float32),
+                        colors=pt_colors,
+                        radii=1.5,
+                    ))
             print(f"[INFO] Logged frame {i}: {name}")
 
 

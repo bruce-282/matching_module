@@ -392,10 +392,22 @@ def main():
         volume_unit_resolution=args.volume_unit_resolution,
         depth_sampling_stride=args.depth_sampling_stride,
     )
+    flip_yz = not args.no_flip_yz
     save_reconstruction(
         mesh, pcd, output_dir, args.output_name,
-        flip_yz=not args.no_flip_yz,
+        flip_yz=flip_yz,
     )
+
+    # # mesh/pcd에 flip_yz 적용했으면 포즈도 동일 좌표계로 맞춰서 저장 (T_new = flip @ T)
+    # if flip_yz:
+    #     flip_transform = np.array([
+    #         [1, 0, 0, 0],
+    #         [0, -1, 0, 0],
+    #         [0, 0, -1, 0],
+    #         [0, 0, 0, 1],
+    #     ], dtype=np.float64)
+    #     poses_list = [flip_transform @ T for T in poses_list]
+    #     print(f"[INFO] Flipped poses for YZ display: {poses_list}")
 
     # 통합에 사용한 포즈를 한 번에 YAML로 저장 (rerun_viewer 등에서 동일 포즈 사용)
     poses_yaml_path = Path(output_dir) / f"{args.output_name}_poses.yaml"
