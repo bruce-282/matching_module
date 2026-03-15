@@ -162,14 +162,7 @@ def main():
             # )
 
             time_start = time.time()
-            result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(
-                target_texture=target_texture,
-                target_depth=target_depth,
-                source_image=source_image,
-                target_texture_path=texture_file,
-                target_depth_path=depth_file,
-                output_dir=output_dir,
-            )
+
             time_end = time.time()
             logger.info(f"Total matching time: {time_end - time_start:.3f} seconds")
         except Exception as e:

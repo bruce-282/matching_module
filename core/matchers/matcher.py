@@ -87,6 +87,7 @@ class Matcher:
             "geometry_type": "Homography",  # Homography or Fundamental
             # 시각화 설정
             "confidence_threshold": 0.5,
+            "result_image_scale": 2.0,  # 결과용 매칭 이미지 확대 (마커 상대 크기 감소)
             # 이미지 resize 설정
             "resize_width": 1024,
             "resize_height": 768,
@@ -874,6 +875,7 @@ class Matcher:
         """실패한 매칭 결과를 시각화하여 저장"""
 
         base_name = Path(target_texture_path).stem
+        display_scale = self.config.get("result_image_scale", 2.0)
         visualize_matches(
             target_clipped,
             source_image,
@@ -883,6 +885,7 @@ class Matcher:
             str(output_path / f"{base_name}_failed_matches_original.png"),
             confidence_threshold=self.config["confidence_threshold"],
             contrast=self.config["result_image_contrast"],
+            display_scale=display_scale,
         )
         visualize_matches(
             target_clipped,
@@ -893,6 +896,7 @@ class Matcher:
             str(output_path / f"{base_name}_failed_matches_ransac_filtered.png"),
             confidence_threshold=self.config["confidence_threshold"],
             contrast=self.config["result_image_contrast"],
+            display_scale=display_scale,
         )
 
     def _backproject_to_3d(self, point: np.ndarray, camera: Camera) -> np.ndarray:
@@ -1009,6 +1013,159 @@ class Matcher:
 
         return None
 
+    def run_pipeline_matching_only(
+        self,
+        target_texture: Optional[np.ndarray] = None,
+        target_depth: Optional[np.ndarray] = None,
+        source_image: Optional[np.ndarray] = None,
+        source_depth: Optional[np.ndarray] = None,
+        target_camera_path: Optional[str] = None,
+        target_texture_path: Optional[str] = None,
+        target_depth_path: Optional[str] = None,
+        output_dir: Optional[str] = None,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """
+        2D 매칭 + RANSAC 필터링 + 선택적 3D 매칭까지만 수행 (앵커/깊이 보정·시각화 등 후처리 제외).
+        run_pipeline의 1037~1159 라인에 해당하는 로직만 실행.
+
+        Args:
+            target_texture: Target texture 이미지 (매칭용)
+            target_depth: Target depth 이미지 (depth 계산용)
+            source_image: Source 이미지 (2D 매칭용)
+            source_depth: Source depth 이미지 (3D 매칭용, None이면 source_image 사용)
+            target_camera_path: Target camera parameter 경로
+            target_texture_path: Target texture 이미지 경로
+            target_depth_path: Target depth 이미지 경로
+            output_dir: 출력 디렉토리
+
+        Returns:
+            Tuple[matches, filtered_matches, result_3d]
+            - matches: 2D 매칭 결과
+            - filtered_matches: RANSAC 필터링 결과
+            - result_3d: 3D 매칭 결과 (enable_3d_matching=True일 때만, 아니면 None)
+        """
+        if target_texture_path is None or target_texture is None:
+            target_texture_path = target_depth_path
+        target_depth_path = target_depth_path or self.config.get("target_depth_path", "")
+        output_dir = output_dir or self.config["output_dir"]
+
+        self.logger.debug(f"Target texture: {target_texture_path}")
+        self.logger.debug(f"Target depth: {target_depth_path}")
+        self.logger.debug(f"Target camera path: {target_camera_path}")
+        self.logger.debug(f"Output directory: {output_dir}")
+
+        self.target_texture_name = Path(target_texture_path).stem
+        self.target_depth_name = Path(target_depth_path).stem
+        self.output_path = Path(output_dir)
+        if self.config["save_essential"] != "none":
+            self.output_path.mkdir(exist_ok=True)
+
+        if target_camera_path is not None:
+            target_camera_config = load_photoneo_camera_config(target_camera_path)
+            self.camera_target = create_camera_from_yaml_config(target_camera_config)
+
+        if "roi_2d_src" in self.config and self.config["roi_2d_src"] is not None:
+            source_image = apply_roi_mask(source_image, self.config["roi_2d_src"])
+
+        try:
+            if self.config["image_undistortion"]:
+                target_depth = self.camera_target.undistort_image(target_depth)
+
+            if target_texture is not None:
+                target_image = target_texture
+                if self.config["image_undistortion"]:
+                    target_image = self.camera_target.undistort_image(target_image)
+                target_clipped = process_depth_map(
+                    depth_image=target_depth,
+                    texture_image=target_image,
+                    depth_max=self.config["depth_max"],
+                )
+            else:
+                target_image = target_depth
+                target_clipped = process_depth_map(
+                    depth_image=target_depth,
+                    depth_max=self.config["depth_max"],
+                )
+            if self.config["image_undistortion"]:
+                source_image = self.camera_source.undistort_image(source_image)
+
+            time_start = time.time()
+            matches = self.run_matching(target_clipped, source_image)
+            time_end = time.time()
+            self.logger.info(f"Matching time: {time_end - time_start:.3f} seconds")
+
+            if matches is None:
+                self.logger.error("2D matching failed")
+                raise Exception("2D matching failed")
+
+            if (
+                self.config["save_essential"] == "all"
+                or self.config["save_essential"] == "2d"
+            ):
+                visualize_matches(
+                    target_clipped,
+                    source_image,
+                    matches["keypoints0"],
+                    matches["keypoints1"],
+                    matches["confidence"],
+                    str(
+                        self.output_path
+                        / f"{self.target_texture_name}_matches_original.png"
+                    ),
+                    confidence_threshold=self.config["confidence_threshold"],
+                    contrast=self.config["result_image_contrast"],
+                    display_scale=self.config.get("result_image_scale", 2.0),
+                )
+            time_start = time.time()
+            filtered_matches = self.run_ransac_filtering(matches)
+            time_end = time.time()
+            self.logger.info(
+                f"RANSAC filtering time: {time_end - time_start:.3f} seconds"
+            )
+
+            if filtered_matches is None:
+                self.logger.error("2D filtering failed")
+                raise Exception("2D filtering failed")
+
+            if (
+                self.config["save_essential"] == "all"
+                or self.config["save_essential"] == "2d"
+            ):
+                visualize_matches(
+                    target_clipped,
+                    source_image,
+                    filtered_matches["filtered_kpts0"],
+                    filtered_matches["filtered_kpts1"],
+                    filtered_matches["filtered_conf"],
+                    str(
+                        self.output_path
+                        / f"{self.target_texture_name}_matches_ransac_filtered.png"
+                    ),
+                    confidence_threshold=self.config["confidence_threshold"],
+                    contrast=self.config["result_image_contrast"],
+                    display_scale=self.config.get("result_image_scale", 2.0),
+                )
+
+            result_3d = None
+            if self.config["enable_3d_matching"]:
+                time_start = time.time()
+                depth_src = source_depth if source_depth is not None else source_image
+                result_3d = self.run_matching_3d(
+                    filtered_matches, depth_target=target_depth, depth_source=depth_src
+                )
+                time_end = time.time()
+                self.logger.info(
+                    f"3D matching time: {time_end - time_start:.3f} seconds"
+                )
+                if result_3d is None:
+                    raise Exception("3D matching failed")
+
+            return matches, filtered_matches, result_3d
+
+        except Exception as e:
+            self.logger.error(f"Pipeline matching only failed: {e}")
+            raise
+
     def run_pipeline(
         self,
         target_texture: Optional[np.ndarray] = None,
@@ -1090,29 +1247,6 @@ class Matcher:
             if self.config["image_undistortion"]:
                 source_image = self.camera_source.undistort_image(source_image)
 
-            def get_point_by_config(selected_points, point_name):
-                return np.array(
-                    [
-                        selected_points[point_name]["x"],
-                        selected_points[point_name]["y"],
-                        selected_points[point_name]["z"],
-                    ]
-                )
-
-            # selected_points 찾기: template_param 최상위 -> template_param.matching_model
-            selected_points = (
-                self.template_param.get("selected_points")
-                or self.template_param.get("matching_model", {}).get("selected_points")
-            )
-            if selected_points is None or not selected_points:
-                raise Exception("Selected points are not set")
-            anchor_point1_3d = get_point_by_config(selected_points, "L")
-            anchor_point2_3d = get_point_by_config(selected_points, "R")
-            anchor_point3_3d = get_point_by_config(selected_points, "U")
-            plane_normal = compute_plane_normal(
-                anchor_point1_3d, anchor_point2_3d, anchor_point3_3d
-            )
-
             time_start = time.time()
             matches = self.run_matching(target_clipped, source_image)
             time_end = time.time()
@@ -1138,6 +1272,7 @@ class Matcher:
                     ),
                     confidence_threshold=self.config["confidence_threshold"],
                     contrast=self.config["result_image_contrast"],
+                    display_scale=self.config.get("result_image_scale", 2.0),
                 )
             time_start = time.time()
             filtered_matches = self.run_ransac_filtering(matches)
@@ -1166,6 +1301,7 @@ class Matcher:
                     ),
                     confidence_threshold=self.config["confidence_threshold"],
                     contrast=self.config["result_image_contrast"],
+                    display_scale=self.config.get("result_image_scale", 2.0),
                 )
 
             if self.config["enable_3d_matching"]:

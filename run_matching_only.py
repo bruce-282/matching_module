@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""
+매칭만 수행하는 스크립트 (2D 매칭 + RANSAC + 선택적 3D 매칭, 후처리 제외).
+Source/Target를 PLY로 줄 경우 config의 image_size만 사용하고, 가상 intrinsic으로 역투영해
+이미지·depth를 생성한 뒤 매칭에 사용.
+"""
+
+import sys
+import os
+import glob
+import argparse
+import shutil
+import warnings
+import logging
+import yaml
+import copy
+import numpy as np
+import open3d as o3d
+
+# torchvision 경고 숨기기
+warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
+
+# 프로젝트 루트를 Python 경로에 추가
+project_root = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, project_root)
+
+from core.matchers.matcher import Matcher
+from core.utils.image_utils import read_image
+from core.utils.logger_utils import setup_logger
+from core.utils.pcd_utils import create_point_cloud_from_depth_image
+from core.utils.geometry_utils import (
+    project_pcd_to_image,
+    project_pcd_to_depth_image,
+)
+from core.utils.io_utils import create_camera_from_yaml_config
+
+
+def build_intrinsic_from_config(config):
+    """config의 camera_intrinsics로 3x3 intrinsic 행렬 생성."""
+    ci = config.get("camera_intrinsics", {})
+    return np.array(
+        [
+            [ci.get("fx", 0), 0, ci.get("cx", 0)],
+            [0, ci.get("fy", 0), ci.get("cy", 0)],
+            [0, 0, 1],
+        ]
+    )
+
+
+def build_virtual_intrinsic(width, height):
+    """이미지 크기만으로 가상 pinhole intrinsic 생성 (fx=fy=max(w,h), cx=w/2, cy=h/2)."""
+    f = float(max(width, height))
+    cx, cy = width / 2.0, height / 2.0
+    return np.array([[f, 0, cx], [0, f, cy], [0, 0, 1]])
+
+
+def ply_to_images(ply_path, config):
+    """
+    PLY를 가상 intrinsic + config의 image_size로 역투영해
+    컬러 이미지와 depth 이미지를 생성.
+    (intrinsic은 image_size만으로 가상 계산)
+
+    Returns:
+        (color_image, depth_image) 또는 실패 시 (None, None)
+    """
+    pcd = o3d.io.read_point_cloud(ply_path)
+    if not pcd.has_points():
+        return None, None
+
+    points_3d = np.asarray(pcd.points)
+    colors = None
+    if pcd.has_colors():
+        colors = (np.asarray(pcd.colors) * 255).astype(np.uint8)
+
+    ims = config.get("image_size", {})
+    w, h = ims.get("width", 640), ims.get("height", 480)
+    image_size = (w, h)
+    K = build_virtual_intrinsic(w, h)
+    depth_max = config.get("depth_max", 5000.0)
+    depth_range = (0.1, float(depth_max))
+
+    depth_image = project_pcd_to_depth_image(
+        points_3d,
+        intrinsic_matrix=K,
+        image_size=image_size,
+        depth_range=depth_range,
+    )
+    color_image = project_pcd_to_image(
+        points_3d,
+        colors=colors,
+        intrinsic_matrix=K,
+        image_size=image_size,
+        depth_range=depth_range,
+    )
+    return color_image, depth_image
+
+
+def main():
+    """메인 함수"""
+
+    parser = argparse.ArgumentParser(
+        description="매칭만 수행 (2D + RANSAC + 선택적 3D 매칭, 후처리 제외)"
+    )
+    parser.add_argument(
+        "--config_path",
+        type=str,
+        required=True,
+        help="Configuration file path (YAML)",
+    )
+    parser.add_argument(
+        "--template_param_path",
+        type=str,
+        default=None,
+        help="Template parameter file path (YAML). --target_ply 와 --source_ply 둘 다 줄 때는 생략 가능 (config 가상 intrinsic 사용)",
+    )
+    parser.add_argument(
+        "--source_ply",
+        type=str,
+        default=None,
+        help="Source PLY path. 지정 시 config의 image_size만 사용해 가상 intrinsic으로 역투영해 source 이미지/depth 생성",
+    )
+    parser.add_argument(
+        "--target_ply",
+        type=str,
+        default=None,
+        help="Target PLY path. 지정 시 가상 intrinsic으로 역투영해 target 이미지/depth 생성 (한 번만 실행)",
+    )
+
+    args = parser.parse_args()
+
+    # Load configuration file (YAML)
+    try:
+        with open(args.config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Configuration file not found: {args.config_path}")
+        return
+    except yaml.YAMLError as e:
+        print(f"YAML file parsing failed: {e}")
+        return
+
+    # template_param: 파일에서 로드하거나, target_ply+source_ply 둘 다 있을 때는 config로 생성
+    if args.template_param_path is not None:
+        try:
+            with open(args.template_param_path, "r", encoding="utf-8") as f:
+                template_param = yaml.safe_load(f)
+        except FileNotFoundError:
+            print(f"Template parameter file not found: {args.template_param_path}")
+            return
+        except yaml.YAMLError as e:
+            print(f"YAML file parsing failed: {e}")
+            return
+    elif args.target_ply and args.source_ply:
+        # 둘 다 PLY → 같은 가상 intrinsic만 쓰므로 config로 최소 template 생성
+        ims = config.get("image_size", {})
+        w, h = ims.get("width", 640), ims.get("height", 480)
+        f = float(max(w, h))
+        template_param = {
+            "camera_intrinsics": {"fx": f, "fy": f, "cx": w / 2.0, "cy": h / 2.0},
+            "camera_distortions": {"k1": 0, "k2": 0, "p1": 0, "p2": 0, "k3": 0},
+            "image_size": {"width": w, "height": h},
+            "path_match_source": "",
+            "selected_points": {"L": {"x": 0, "y": 0, "z": 1000}, "R": {"x": 100, "y": 0, "z": 1000}, "U": {"x": 50, "y": 50, "z": 1000}},
+        }
+    else:
+        print("--template_param_path 가 필요합니다. (--target_ply, --source_ply 둘 다 주면 생략 가능)")
+        return
+
+    # 로거 설정
+    if config.get("debug_mode", False):
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+    logger = setup_logger(__name__)
+
+    # Matcher 인스턴스 생성
+    matcher = Matcher(config=config, template_param=template_param)
+    matcher.init_config(config=config, template_param=template_param)
+
+    input_dir = config.get("input_dir", "datasets")
+    depth_files = glob.glob(os.path.join(input_dir, "*_depth.tif"))
+    if not args.target_ply and not depth_files:
+        logger.warning(f"No *_depth.tif files found in {input_dir}. Use --target_ply or set input_dir.")
+        return
+
+    ims = config.get("image_size", {})
+    w, h = ims.get("width", 640), ims.get("height", 480)
+    virtual_camera_config = {
+        "camera_intrinsics": {"fx": float(max(w, h)), "fy": float(max(w, h)), "cx": w / 2.0, "cy": h / 2.0},
+        "camera_distortions": {"k1": 0, "k2": 0, "p1": 0, "p2": 0, "k3": 0},
+        "image_size": {"width": w, "height": h},
+    }
+
+    # Source: PLY 역투영 또는 이미지 경로
+    source_image = None
+    source_depth = None
+    if args.source_ply:
+        if not os.path.isfile(args.source_ply):
+            logger.error(f"Source PLY not found: {args.source_ply}")
+            return
+        logger.info(
+            f"Building source from PLY: {args.source_ply} (가상 intrinsic, image_size={w}x{h})"
+        )
+        source_image, source_depth = ply_to_images(args.source_ply, config)
+        if source_image is None or source_depth is None:
+            logger.error("Failed to project PLY to source image/depth")
+            return
+        matcher.camera_source = create_camera_from_yaml_config(virtual_camera_config)
+    else:
+        path_match_source = (
+            template_param.get("path_match_source")
+            or template_param.get("matching_model", {}).get("path_match_source")
+        )
+        if path_match_source is None:
+            logger.error("path_match_source를 찾을 수 없습니다. template_param 또는 --source_ply 사용.")
+            return
+        intrinsic_matrix = build_intrinsic_from_config(config)
+        image_size_dict = config.get("image_size", {})
+        source_image = read_image(
+            path_match_source,
+            width=image_size_dict.get("width"),
+            height=image_size_dict.get("height"),
+            intrinsic_matrix=intrinsic_matrix,
+        )
+        if source_image is None:
+            logger.error(f"Source image not found: {path_match_source}")
+            return
+
+    output_dir = config.get("output_dir", "output")
+    os.makedirs(output_dir, exist_ok=True)
+
+    def run_one(target_texture, target_depth, target_texture_path, target_depth_path, base_name):
+        """한 번의 매칭 실행 + 변환 PLY 저장."""
+        matches, filtered_matches, result_3d = matcher.run_pipeline_matching_only(
+            target_texture=target_texture,
+            target_depth=target_depth,
+            source_image=source_image,
+            source_depth=source_depth,
+            target_texture_path=target_texture_path,
+            target_depth_path=target_depth_path,
+            output_dir=output_dir,
+        )
+        if result_3d is not None:
+            try:
+                if args.source_ply:
+                    pcd_source = o3d.io.read_point_cloud(args.source_ply)
+                else:
+                    src_for_pcd = source_image
+                    if matcher.config.get("image_undistortion", False):
+                        src_for_pcd = matcher.camera_source.undistort_image(source_image)
+                    depth_src = (
+                        src_for_pcd[:, :, 0]
+                        if len(src_for_pcd.shape) == 3
+                        else src_for_pcd
+                    )
+                    pcd_source = create_point_cloud_from_depth_image(
+                        depth_src,
+                        matcher.camera_source.get_intrinsic_matrix(),
+                        texture_image=None,
+                    )
+                pcd_transformed = copy.deepcopy(pcd_source)
+                pcd_transformed.transform(result_3d["transformation"])
+                ply_path = os.path.join(output_dir, f"{base_name}_source_transformed.ply")
+                o3d.io.write_point_cloud(ply_path, pcd_transformed)
+                logger.info(f"Saved transformed source PLY: {ply_path}")
+            except Exception as e:
+                logger.warning(f"Failed to save transformed source PLY: {e}")
+        logger.info(
+            f"Success - {base_name}: "
+            f"matches={len(matches['keypoints0'])}, "
+            f"filtered={len(filtered_matches['filtered_kpts0'])}, "
+            f"3d_result={'OK' if result_3d is not None else 'N/A'}"
+        )
+        return matches, filtered_matches, result_3d
+
+    if args.target_ply:
+        # Target도 PLY에서 생성 → 1회 실행
+        if not os.path.isfile(args.target_ply):
+            logger.error(f"Target PLY not found: {args.target_ply}")
+            return
+        logger.info(
+            f"Building target from PLY: {args.target_ply} (가상 intrinsic, image_size={w}x{h})"
+        )
+        target_texture, target_depth = ply_to_images(args.target_ply, config)
+        if target_texture is None or target_depth is None:
+            logger.error("Failed to project PLY to target image/depth")
+            return
+        matcher.camera_target = create_camera_from_yaml_config(virtual_camera_config)
+        # target·source 조합 이름으로 저장해 덮어쓰기 방지 (예: 5_6, 5_15)
+        target_stem = os.path.splitext(os.path.basename(args.target_ply))[0]
+        source_stem = os.path.splitext(os.path.basename(args.source_ply))[0]
+        base_name = f"{target_stem}_{source_stem}"
+        # matcher는 target_texture_path의 stem으로 출력 파일명 생성
+        fake_path = f"{base_name}.ply"
+        try:
+            # 원본 target PLY 저장 (변환된 source와 쌍으로 보관)
+            target_ply_out = os.path.join(output_dir, f"{base_name}_target.ply")
+            shutil.copy2(args.target_ply, target_ply_out)
+            logger.info(f"Saved target PLY: {target_ply_out}")
+            run_one(
+                target_texture, target_depth,
+                fake_path, fake_path,
+                base_name,
+            )
+        except Exception as e:
+            logger.error(f"Failed - {base_name}: {e}")
+    else:
+        for depth_file in depth_files:
+            base_name = os.path.basename(depth_file).replace("_depth.tif", "")
+            texture_file = os.path.join(input_dir, f"{base_name}_texture.png")
+
+            logger.info(f"Processing: {depth_file}")
+
+            if not os.path.exists(texture_file):
+                logger.warning(f"Texture file not found: {texture_file}. Skipping.")
+                continue
+
+            try:
+                target_texture = read_image(texture_file)
+                target_depth = read_image(depth_file)
+                run_one(
+                    target_texture, target_depth,
+                    texture_file, depth_file,
+                    base_name,
+                )
+            except Exception as e:
+                logger.error(f"Failed - {base_name}: {e}")
+                continue
+
+    matcher.cleanup()
+    logger.info("Execution completed")
+
+
+if __name__ == "__main__":
+    main()

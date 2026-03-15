@@ -1,0 +1,42 @@
+# SL_ch_260315 데이터셋용 설정 (PLY → 가상 intrinsic 역투영)
+input_dir: "datasets/SL_ch_260315"
+output_dir: "output/SL_ch_260315"
+
+max_keypoints: 3000
+geometry_type: "Fundamental"
+ransac_method: "CV2_USAC_MAGSAC"
+ransac_reproj_threshold: 3.0
+ransac_max_iter: 50000
+ransac_confidence: 0.9999
+debug_mode: true
+save_essential: "all"
+depth_max: 3000.0
+enable_3d_matching: true
+pose_estimation_method: "ransac"
+result_image_contrast: 1.0
+result_image_scale: 2.0   # 결과 매칭 이미지 2배 확대 (마커 상대 크기 감소)
+image_undistortion: false
+
+ransac_3d:
+  max_correspondence_distance: 0.2
+  ransac_n: 7
+  max_iterations: 3000
+  confidence: 0.9999
+
+# PLY 역투영 시 이 image_size만 사용 (가상 intrinsic)
+image_size:
+  width: 1224
+  height: 1024
+
+# PLY 사용 시 무시됨. 가상 카메라와 맞추기 위해 동일 값 유지
+camera_intrinsics:
+  fx: 1224
+  fy: 1224
+  cx: 612
+  cy: 512
+camera_distortions:
+  k1: 0
+  k2: 0
+  p1: 0
+  p2: 0
+  k3: 0

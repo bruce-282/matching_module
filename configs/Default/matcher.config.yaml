@@ -29,21 +29,7 @@ ransac_3d:
   confidence: 0.9999
               
 
-camera_intrinsics:
-  fx: 2344.06988494
-  fy: 2344.40009342502
-  cx: 989.06314625513
-  cy: 807.02989528271
-camera_distortions:
-  k1: -0.24331290305526787
-  k2: 0.13922919417642093
-  p1: 0.0005252878633098153
-  p2: -0.0010237886757940777
-  k3: -0.01443719970450923
-
 image_size:
-  width: 2064
-  height: 1544
+  width: 1224
+  height: 1024
 
-
-image_undistortion: true

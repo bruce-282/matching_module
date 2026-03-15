@@ -25,10 +25,9 @@ def visualize_matches(
     circle_color: Tuple[int, int, int] = (0, 255, 0),  # 녹색
     line_color: Tuple[int, int, int] = (255, 0, 0),  # 파란색
     contrast: int = 0,
+    display_scale: float = 1.0,
 ):
-    """매칭 결과를 시각화합니다."""
-    # 이미지 로드
-
+    """매칭 결과를 시각화합니다. display_scale > 1 이면 결과용 이미지를 키워서 마커가 상대적으로 작게 보이게 함."""
     if image0_origin is None or image1_origin is None:
         raise ValueError(
             f"이미지를 로드할 수 없습니다: {image0_origin}, {image1_origin}"
@@ -38,9 +37,20 @@ def visualize_matches(
     img0_rgb = cv2.cvtColor(image0_origin, cv2.COLOR_BGR2RGB)
     img1_rgb = cv2.cvtColor(image1_origin, cv2.COLOR_BGR2RGB)
 
-    # 이미지 크기 조정 (높이 맞춤)
     h0, w0 = img0_rgb.shape[:2]
     h1, w1 = img1_rgb.shape[:2]
+
+    # 결과용 이미지 확대 (마커가 상대적으로 작게 보이도록)
+    if display_scale != 1.0 and display_scale > 0:
+        new_w0, new_h0 = int(w0 * display_scale), int(h0 * display_scale)
+        new_w1, new_h1 = int(w1 * display_scale), int(h1 * display_scale)
+        img0_rgb = cv2.resize(img0_rgb, (new_w0, new_h0), interpolation=cv2.INTER_LINEAR)
+        img1_rgb = cv2.resize(img1_rgb, (new_w1, new_h1), interpolation=cv2.INTER_LINEAR)
+        w0, h0, w1, h1 = new_w0, new_h0, new_w1, new_h1
+        keypoints0 = np.asarray(keypoints0, dtype=np.float64) * display_scale
+        keypoints1 = np.asarray(keypoints1, dtype=np.float64) * display_scale
+
+    # 이미지 크기 조정 (높이 맞춤)
 
     # 두 이미지의 높이를 맞춤
     max_height = max(h0, h1)
