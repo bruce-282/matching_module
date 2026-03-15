@@ -2,10 +2,10 @@
 input_dir: "datasets/SL_ch_260315"
 output_dir: "output/SL_ch_260315"
 
-max_keypoints: 9000
+max_keypoints: 7000
 geometry_type: "Fundamental"
 ransac_method: "CV2_USAC_MAGSAC"
-ransac_reproj_threshold: 3.0
+ransac_reproj_threshold: 2.0
 ransac_max_iter: 90000
 ransac_confidence: 0.99999
 debug_mode: true
@@ -18,10 +18,10 @@ result_image_scale: 2.0   # 결과 매칭 이미지 2배 확대 (마커 상대 �
 image_undistortion: false
 
 ransac_3d:
-  max_correspondence_distance: 0.5   # mm 단위 가정
+  max_correspondence_distance: 2.0   # mm 단위 가정
   ransac_n: 5                        
-  max_iterations: 90000               # 반복 수 증가
-  confidence: 0.9999
+  max_iterations: 80000               # 반복 수 증가
+  confidence: 0.99999
 
 # PLY 역투영 시 이 image_size만 사용 (가상 intrinsic)
 image_size:

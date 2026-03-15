@@ -79,21 +79,27 @@ def ply_to_rgbd(ply_path: str, config: dict, depth_scale: float = 1000.0) -> tup
         depth_trunc=depth_max / depth_scale,
         convert_rgb_to_intensity=False,
     )
-
+    
     intrinsic = o3d.camera.PinholeCameraIntrinsic(
         width=w, height=h,
         fx=K[0, 0], fy=K[1, 1], cx=K[0, 2], cy=K[1, 2],
     )
+    print(f"Intrinsic: {intrinsic.intrinsic_matrix}")
     return rgbd, intrinsic
 
 
-def load_pose_from_yaml(yaml_path: str) -> np.ndarray:
-    """YAML에서 transformation (4x4) 로드."""
+def load_pose_from_yaml(yaml_path: str, pose_scale: float = 1.0) -> np.ndarray:
+    """YAML에서 transformation (4x4) 로드.
+    pose_scale: translation 스케일 (매칭이 mm 단위면 0.001로 해서 meter로 변환)
+    """
     with open(yaml_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if "transformation" not in data:
         raise ValueError(f"No 'transformation' in {yaml_path}")
     T = np.array(data["transformation"], dtype=np.float64)
+    if pose_scale != 1.0:
+        T = T.copy()
+        T[:3, 3] *= pose_scale
     return T
 
 
@@ -119,10 +125,10 @@ class TSDFVolumeIntegrator:
 
     def __init__(
         self,
-        voxel_length=2.8 / 512.0,
-        sdf_trunc=0.04,
-        volume_unit_resolution=16,
-        depth_sampling_stride=4,
+        voxel_length=0.0005,
+        sdf_trunc=0.02,
+        volume_unit_resolution=32,
+        depth_sampling_stride=1,
     ):
         self.volume = o3d.pipelines.integration.ScalableTSDFVolume(
             voxel_length=voxel_length,
@@ -160,8 +166,10 @@ def integrate_rgbd_frames(
     rgbd_list,
     intrinsics_list,
     poses_list,
-    voxel_length=2.8 / 512.0,
-    sdf_trunc=0.04,
+    voxel_length=0.0005,
+    sdf_trunc=0.02,
+    volume_unit_resolution=32,
+    depth_sampling_stride=1,
 ):
     """
     여러 RGBD 프레임을 통합하여 3D 모델 생성
@@ -170,13 +178,20 @@ def integrate_rgbd_frames(
         rgbd_list: RGBD 이미지 리스트
         intrinsics_list: 카메라 내부 파라미터 리스트
         poses_list: 카메라 포즈 리스트 (camera-to-world, 4x4)
-        voxel_length: voxel 크기 (meter)
+        voxel_length: voxel 크기 (meter). 작을수록 해상도 상승, 메모리 증가
         sdf_trunc: truncation distance (meter)
+        volume_unit_resolution: 볼륨 단위당 해상도
+        depth_sampling_stride: 1=전체 픽셀, 2/4=서브샘플 (작을수록 고해상도)
 
     Returns:
         mesh, pcd
     """
-    integrator = TSDFVolumeIntegrator(voxel_length, sdf_trunc)
+    integrator = TSDFVolumeIntegrator(
+        voxel_length=voxel_length,
+        sdf_trunc=sdf_trunc,
+        volume_unit_resolution=volume_unit_resolution,
+        depth_sampling_stride=depth_sampling_stride,
+    )
 
     for i, (rgbd, intrinsic, pose) in enumerate(zip(rgbd_list, intrinsics_list, poses_list)):
         print(f"Integrating frame {i} into the volume...")
@@ -201,6 +216,14 @@ def save_reconstruction(mesh, pcd, output_dir: str, name: str, flip_yz: bool = T
         ], dtype=np.float64)
         mesh.transform(flip_transform)
         pcd.transform(flip_transform)
+
+    # PLY 저장 시 "clamped color" 경고 방지: vertex color를 [0,1]로 클램핑
+    if mesh.has_vertex_colors():
+        colors = np.asarray(mesh.vertex_colors)
+        mesh.vertex_colors = o3d.utility.Vector3dVector(np.clip(colors, 0.0, 1.0))
+    if pcd.has_colors():
+        colors = np.asarray(pcd.colors)
+        pcd.colors = o3d.utility.Vector3dVector(np.clip(colors, 0.0, 1.0))
 
     mesh_path = output_dir / f"{name}_mesh.ply"
     pcd_path = output_dir / f"{name}_pcd.ply"
@@ -238,8 +261,36 @@ def main():
     )
     parser.add_argument("--output_dir", type=str, default=None, help="출력 디렉토리")
     parser.add_argument("--output_name", type=str, default="tsdf_fused", help="출력 파일명 prefix")
-    parser.add_argument("--voxel_length", type=float, default=2.8 / 512.0, help="voxel 크기 (m)")
-    parser.add_argument("--sdf_trunc", type=float, default=0.04, help="truncation distance (m)")
+    parser.add_argument(
+        "--voxel_length",
+        type=float,
+        default=0.0005,
+        help="voxel 크기 (m). 작을수록 고해상도, 메모리 증가. 예: 0.0005=0.5mm",
+    )
+    parser.add_argument(
+        "--sdf_trunc",
+        type=float,
+        default=0.02,
+        help="truncation distance (m). 작을수록 날카로운 디테일 유지",
+    )
+    parser.add_argument(
+        "--depth_sampling_stride",
+        type=int,
+        default=1,
+        help="depth 서브샘플 (1=전체픽셀, 2/4=저해상도 빠름)",
+    )
+    parser.add_argument(
+        "--volume_unit_resolution",
+        type=int,
+        default=32,
+        help="ScalableTSDF 볼륨 단위 해상도 (32=고해상도)",
+    )
+    parser.add_argument(
+        "--pose_scale",
+        type=float,
+        default=0.001,
+        help="YAML pose의 translation 스케일 (mm→m: 0.001). 이미 meter면 1.0",
+    )
     parser.add_argument("--no_flip_yz", action="store_true", help="Y/Z 축 뒤집기 비활성화")
 
     args = parser.parse_args()
@@ -304,7 +355,7 @@ def main():
         if not src_ply.exists():
             print(f"[WARN] Skip {source}: PLY not found")
             continue
-        T = load_pose_from_yaml(yaml_path)
+        T = load_pose_from_yaml(yaml_path, pose_scale=args.pose_scale)
         rgbd, intrinsic = ply_to_rgbd(str(src_ply), config)
         if rgbd is None:
             print(f"[WARN] Skip {source}: RGBD creation failed")
@@ -321,6 +372,8 @@ def main():
         rgbd_list, intrinsics_list, poses_list,
         voxel_length=args.voxel_length,
         sdf_trunc=args.sdf_trunc,
+        volume_unit_resolution=args.volume_unit_resolution,
+        depth_sampling_stride=args.depth_sampling_stride,
     )
     save_reconstruction(
         mesh, pcd, output_dir, args.output_name,
