@@ -64,7 +64,7 @@ class RerunViewer:
         rr.log(entity_path, rr.Mesh3D(
             vertex_positions=np.asarray(mesh.vertices, dtype=np.float32),
             triangle_indices=np.asarray(mesh.triangles, dtype=np.uint32),
-            vertex_colors=np.asarray(mesh.vertex_colors, dtype=np.uint8) if mesh.has_vertex_colors() else None,
+            vertex_colors=(np.asarray(mesh.vertex_colors) * 255).astype(np.uint8) if mesh.has_vertex_colors() else None,
         ))
 
     def log_point_cloud(self, pcd_path: str, entity_path: str = "world/reconstruction_pcd", flip_yz: bool = True):
@@ -79,23 +79,18 @@ class RerunViewer:
         colors = (np.asarray(pcd.colors) * 255).astype(np.uint8) if pcd.has_colors() else None
         rr.log(entity_path, rr.Points3D(positions=pts, colors=colors, radii=0.002))
 
-    # def log_camera_pose(self, T_c2w: np.ndarray, name: str, entity_path: str = "world/cameras", scale: float = 0.1):
-    #     t_w2c, R_w2c = _pose_to_rerun_transform(T_c2w)
-    #     path = f"{entity_path}/{name}"
-    #     rr.log(path, rr.Transform3D(translation=t_w2c.tolist(), mat3x3=R_w2c.tolist()))
-    #     rr.log(f"{path}/axes", rr.Arrows3D(
-    #         origins=[[0,0,0],[0,0,0],[0,0,0]],
-    #         vectors=[[scale,0,0],[0,scale,0],[0,0,scale]],
-    #         colors=[[255,0,0],[0,255,0],[0,0,255]],
-    #     ))
-
-    def log_camera_pose(self, T_c2w, name, entity_path="world/cameras", scale=0.1):
+    def log_camera_pose(self, T_c2w: np.ndarray, name: str, entity_path: str = "world/cameras", scale: float = 0.1):
         R = T_c2w[:3, :3]
         t = T_c2w[:3, 3]
         path = f"{entity_path}/{name}"
         rr.log(path, rr.Transform3D(
             translation=t.tolist(),
             mat3x3=R.tolist(),
+        ))
+        rr.log(f"{path}/axes", rr.Arrows3D(
+            origins=[[0,0,0],[0,0,0],[0,0,0]],
+            vectors=[[scale,0,0],[0,scale,0],[0,0,scale]],
+            colors=[[255,0,0],[0,255,0],[0,0,255]],
         ))
 
     def _ply_to_color_image(self, ply_path: str, config: dict):
@@ -168,24 +163,24 @@ class RerunViewer:
 
     @staticmethod
     def _project_to_camera(
-        points_world_mm: np.ndarray,
-        T_c2w_meter: np.ndarray,
+        points_world: np.ndarray,
+        T_c2w: np.ndarray,
         K: np.ndarray,
         image_size: tuple[int, int],
-        depth_min: float = 1.0,
-        depth_max: float = 10000.0,
+        depth_min: float = 0.01,
+        depth_max: float = 100.0,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """World(mm) 포인트를 카메라 이미지에 projection.
+        """World 포인트를 카메라 이미지에 projection.
 
-        T_c2w_meter: camera-to-world, translation은 meter.
-        P_cam = R^T @ (P_world_mm - t_mm)  (c2w의 역변환 = w2c)
+        fused_pcd(meter)와 pose translation(meter)이 동일 단위.
+        c2w 역변환: P_cam = R^T @ (P_world - t)
         """
-        R = T_c2w_meter[:3, :3]
-        t_mm = T_c2w_meter[:3, 3] * 1000.0  # meter → mm
+        R = T_c2w[:3, :3]
+        t = T_c2w[:3, 3]  # 둘 다 meter, 변환 불필요
 
         # c2w 역변환: P_cam = R^T @ (P_world - t)
-        # row-vector convention: (P - t) @ R  ← 이것이 R^T @ (P - t) 와 동치
-        pts_cam = (points_world_mm - t_mm) @ R
+        # row-vector: (P - t) @ R
+        pts_cam = (points_world - t) @ R
 
         depth = pts_cam[:, 2]
         valid = (depth >= depth_min) & (depth <= depth_max)
@@ -212,27 +207,10 @@ class RerunViewer:
         flip_yz: bool = True,
         points_subsample: int = 10,
     ) -> None:
+        """각 카메라별 PLY → RGB 이미지 생성 후 Rerun에 로깅."""
         ply_dir = Path(ply_dir)
         ims = config.get("image_size", {})
         w, h = ims.get("width", 640), ims.get("height", 480)
-        f = float(max(w, h))
-        K = np.array([[f, 0, w/2.0], [0, f, h/2.0], [0, 0, 1]])
-        image_size = (w, h)
-
-        # fused_pcd 로드 → un-flip → 원본 world(mm) 좌표계 복원
-        points_world = None
-        colors_world = None
-        if fused_pcd_path and Path(fused_pcd_path).exists() and o3d is not None:
-            pcd = o3d.io.read_point_cloud(str(fused_pcd_path))
-            if pcd.has_points():
-                pts = np.asarray(pcd.points, dtype=np.float64)
-                if flip_yz:
-                    pts = pts * np.array([1, -1, -1], dtype=np.float64)
-                points_world = pts[::points_subsample].copy()
-                if pcd.has_colors():
-                    colors_world = (np.asarray(pcd.colors) * 255).astype(np.uint8)[::points_subsample]
-                print(f"[INFO] Projection: {len(points_world)} pts, "
-                      f"z=[{points_world[:,2].min():.1f}, {points_world[:,2].max():.1f}] mm")
 
         for i, name in enumerate(camera_names):
             if hasattr(rr, "set_time_sequence"):
@@ -247,21 +225,9 @@ class RerunViewer:
             cam_path = f"{entity_path}/{name}/image"
             rr.log(cam_path, rr.Pinhole(
                 image_from_camera=[[fx, 0, cx], [0, fy, cy], [0, 0, 1]], width=w, height=h,
+                image_plane_distance=0.3,
             ))
             rr.log(cam_path, rr.Image(color_image))
-
-            if points_world is not None and i < len(camera_poses):
-                uv, valid = self._project_to_camera(
-                    points_world, camera_poses[i], K, image_size,
-                )
-                uv_valid = uv[valid]
-                print(f"[DEBUG] {name}: {len(uv_valid)} / {len(points_world)} projected")
-                if len(uv_valid) > 0:
-                    pt_colors = colors_world[valid] if colors_world is not None else None
-                    rr.log(cam_path, rr.Points2D(
-                        positions=uv_valid.astype(np.float32),
-                        colors=pt_colors, radii=1.5,
-                    ))
             print(f"[INFO] Frame {i}: {name}")
 
 
