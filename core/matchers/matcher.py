@@ -28,11 +28,12 @@ sys.path.insert(0, str(project_root))
 from core.utils.logger_utils import setup_logger
 from .models.roma import Roma
 from ..utils.image_utils import resize_image, process_depth_map, apply_roi_mask
-from ..utils.viz_utils import visualize_matches, warp_images
+from ..utils.viz_utils import visualize_matches, warp_images, visualize_3d_correspondences
 from ..utils.processing_utils import (
     filter_matches,
     registration_ransac_based_on_correspondence,
     solve_rigid_transform_between_points,
+    chamfer_distance,
 )
 from ..utils.io_utils import save_points_to_yaml, create_camera_from_yaml_config, load_photoneo_camera_config
 from ..utils.pcd_utils import (
@@ -77,7 +78,7 @@ class Matcher:
             # 매칭 설정
             "max_keypoints": 3000,
             "match_threshold": 0.2,
-            "model_name": "minima_roma.pth",
+            "model_name": "roma_outdoor.pth",
             # RANSAC 설정
             "ransac_method": "CV2_USAC_MAGSAC",
             "ransac_reproj_threshold": 12.0,
@@ -1626,6 +1627,10 @@ class Matcher:
             points_3d_target = np.array(points_3d_target)
             points_3d_source = np.array(points_3d_source)
 
+            # 시각화용: 기본은 전체 대응점, TEASER++는 result["correspondences"] 사용
+            viz_ref_corr = points_3d_target
+            viz_src_corr = points_3d_source
+
             correspondences = [[i, i] for i in valid_indices]
             # correspondences = o3d.utility.Vector2iVector(correspondences)
             pcd_target = o3d.geometry.PointCloud()
@@ -1635,10 +1640,13 @@ class Matcher:
             pcd_source.points = o3d.utility.Vector3dVector(points_3d_source)
 
             # RANSAC registration with known correspondences
+            num_inliers = None
+            fitness = None
+            inlier_rmse = None
             if self.config["pose_estimation_method"] == "ransac":
                 # Config에서 RANSAC 파라미터 가져오기
                 ransac_3d_config = self.config.get("ransac_3d", {})
-                pose = registration_ransac_based_on_correspondence(
+                reg_result = registration_ransac_based_on_correspondence(
                     pcd_source,
                     pcd_target,
                     correspondences,
@@ -1649,6 +1657,20 @@ class Matcher:
                     max_iterations=ransac_3d_config.get("max_iterations", 5000),
                     confidence=ransac_3d_config.get("confidence", 0.9999),
                 )
+                if reg_result is not None:
+                    pose = reg_result.transformation
+                    fitness = float(reg_result.fitness)
+                    inlier_rmse = float(reg_result.inlier_rmse)
+                    # Inlier correspondence_set으로 시각화 (n x 2: [src_idx, tgt_idx])
+                    corr_set = np.asarray(reg_result.correspondence_set)
+                    num_inliers = len(corr_set)
+                    if len(corr_set) > 0:
+                        pts_src = np.asarray(pcd_source.points)
+                        pts_tgt = np.asarray(pcd_target.points)
+                        viz_src_corr = pts_src[corr_set[:, 0]]
+                        viz_ref_corr = pts_tgt[corr_set[:, 1]]
+                else:
+                    pose = None
             elif self.config["pose_estimation_method"] == "svd":
                 # Open3D PointCloud에서 numpy array로 변환
                 points_source_np = np.asarray(pcd_source.points)
@@ -1657,6 +1679,7 @@ class Matcher:
                 pose = solve_rigid_transform_between_points(
                     points_source_np, points_target_np
                 )
+                num_inliers = len(points_source_np)  # SVD는 전체 사용
 
             elif self.config["pose_estimation_method"] == "teaserpp":
                 # TEASER++ registration
@@ -1665,7 +1688,7 @@ class Matcher:
 
                     # TEASER++ 모델 초기화
                     teaserpp_conf = {
-                        "noise_bound": self.config.get("teaserpp_noise_bound", 0.1)
+                        "noise_bound": self.config.get("teaserpp_noise_bound", 0.05)  # mm 단위 (1.0=1mm)
                     }
                     teaserpp_model = Teaserpp(teaserpp_conf)
 
@@ -1682,9 +1705,14 @@ class Matcher:
 
                     if result["success"]:
                         pose = result["transformation"]
+                        num_inliers = result["num_inliers"]
                         self.logger.info(
-                            f"TEASER++ registration successful - Inliers: {result['num_inliers']}"
+                            f"TEASER++ registration successful - Inliers: {num_inliers}"
                         )
+                        # TEASER++ correspondence로 시각화 (inlier 대응점)
+                        src_pts, tgt_pts = result["correspondences"]  # (source, target)
+                        viz_ref_corr = np.asarray(tgt_pts)
+                        viz_src_corr = np.asarray(src_pts)
 
                 except Exception as e:
                     self.logger.error(f"TEASER++ registration error: {e}")
@@ -1708,10 +1736,50 @@ class Matcher:
 
             pcd_source_transformed.transform(pose)
 
+            # Chamfer distance (변환된 source vs target)
+            cd = None
+            try:
+                src_transformed = (
+                    (pose[:3, :3] @ viz_src_corr.T).T + pose[:3, 3]
+                )
+                cd = chamfer_distance(
+                    viz_ref_corr,
+                    src_transformed,
+                    device=self.device,
+                    symmetric=True,
+                )
+                self.logger.info(f"Chamfer distance (ref vs transformed_src): {cd:.4f}")
+            except Exception as cd_e:
+                self.logger.warning(f"Chamfer distance failed: {cd_e}")
+                cd = None
+
+            # 3D correspondence 시각화 (REF=target, SRC=source)
+            if self.config.get("save_essential") in ("all", "3d"):
+                try:
+                    out_path = self.output_path / f"{self.target_texture_name}_3d_correspondences.png"
+                    visualize_3d_correspondences(
+                        viz_ref_corr,
+                        viz_src_corr,
+                        str(out_path),
+                        projection="xy",
+                        max_points=1000,
+                        line_step=10,
+                    )
+                except Exception as viz_e:
+                    self.logger.warning(f"3D correspondence visualization failed: {viz_e}")
+
             # 8. 결과 반환
-            return {
-                "transformation": pose
-            }
+            result_dict = {"transformation": pose}
+            if cd is not None:
+                result_dict["chamfer_distance"] = cd
+            if num_inliers is not None:
+                result_dict["num_inliers"] = num_inliers
+            if fitness is not None:
+                result_dict["fitness"] = fitness
+            if inlier_rmse is not None:
+                result_dict["inlier_rmse"] = inlier_rmse
+            result_dict["pose_estimation_method"] = self.config["pose_estimation_method"]
+            return result_dict
 
         except Exception as e:
             self.logger.error(f"3D matching failed: {e}")

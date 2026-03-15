@@ -4,6 +4,7 @@ RANSAC 유틸리티 함수들
 
 import cv2
 import numpy as np
+import torch
 from pathlib import Path
 import yaml
 import open3d as o3d
@@ -360,7 +361,7 @@ def registration_ransac_based_on_correspondence(pcd_source: o3d.geometry.PointCl
         confidence: RANSAC confidence
     
     Returns:
-        Transformation matrix
+        RegistrationResult (transformation, correspondence_set 등) 또는 None
     """
     try:
         # Correspondence vector 생성
@@ -381,9 +382,50 @@ def registration_ransac_based_on_correspondence(pcd_source: o3d.geometry.PointCl
         logger.debug(f"[3D RANSAC] converged: {result.fitness > 0.1}")
         logger.debug(f"[3D RANSAC] Inlier correspondences: {len(result.correspondence_set)} pairs")
         logger.debug(f"[3D RANSAC] transformation : {result.transformation}")
-        return result.transformation
+        return result  # RegistrationResult (transformation, correspondence_set 등)
         
     except Exception as e:
         logger.error(f"Error in registration_ransac_based_on_correspondence: {e}")
         # 실패 시 identity transformation 반환
         return None
+
+
+def chamfer_distance(
+    ref_points: np.ndarray,
+    src_points: np.ndarray,
+    device: Optional[torch.device] = None,
+    symmetric: bool = True,
+) -> float:
+    """
+    Chamfer Distance (GPU 가능).
+    ref=target, src=source. symmetric=True면 양방향 평균.
+
+    Args:
+        ref_points: (N, 3) reference points
+        src_points: (M, 3) source points
+        device: torch device (None이면 cuda 또는 cpu)
+        symmetric: True면 ref→src, src→ref 양방향 평균
+
+    Returns:
+        mean chamfer distance
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def _to_tensor(x):
+        if isinstance(x, np.ndarray):
+            return torch.tensor(x, dtype=torch.float32, device=device)
+        return x.to(device)
+
+    ref = _to_tensor(ref_points)
+    src = _to_tensor(src_points)
+
+    def _one_way(a, b):
+        dist = torch.cdist(a.unsqueeze(0), b.unsqueeze(0)).squeeze(0)
+        return torch.mean(torch.min(dist, dim=0)[0]).item()
+
+    if symmetric:
+        cd = (_one_way(ref, src) + _one_way(src, ref)) / 2.0
+    else:
+        cd = _one_way(ref, src)
+    return cd

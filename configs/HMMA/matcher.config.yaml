@@ -23,7 +23,7 @@ pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
 result_image_contrast: 5.0
 # 3D RANSAC 파라미터
 ransac_3d:
-  max_correspondence_distance: 0.2
+  max_correspondence_distance: 0.1
   ransac_n: 7                         
   max_iterations: 3000                
   confidence: 0.9999

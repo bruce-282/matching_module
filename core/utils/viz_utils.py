@@ -2,6 +2,7 @@
 시각화 유틸리티
 """
 
+import logging
 import cv2
 import numpy as np
 from pathlib import Path
@@ -33,9 +34,9 @@ def visualize_matches(
             f"이미지를 로드할 수 없습니다: {image0_origin}, {image1_origin}"
         )
 
-    # BGR to RGB 변환
-    img0_rgb = cv2.cvtColor(image0_origin, cv2.COLOR_BGR2RGB)
-    img1_rgb = cv2.cvtColor(image1_origin, cv2.COLOR_BGR2RGB)
+    # PLY 역투영(project_pcd_to_image), read_image는 RGB 반환. BGR 변환 생략.
+    img0_rgb = np.asarray(image0_origin).copy()
+    img1_rgb = np.asarray(image1_origin).copy()
 
     h0, w0 = img0_rgb.shape[:2]
     h1, w1 = img1_rgb.shape[:2]
@@ -222,3 +223,175 @@ def warp_images(
     overlapped_image = overlapped_image.astype(np.uint8)
 
     return overlapped_image, warped_image
+
+
+def visualize_3d_correspondences(
+    ref_corr: np.ndarray,
+    src_corr: np.ndarray,
+    output_path: str,
+    *,
+    max_points: int = 500,
+    line_step: int = 10,
+    projection: str = "xy",
+    title: Optional[str] = None,
+    figsize: Tuple[float, float] = (8, 6),
+    dpi: int = 150,
+    show_both_xy_xz: bool = True,
+    color_by_depth: bool = True,
+) -> None:
+    """
+    3D correspondence를 2D 평면에 투영해 시각화 (REF=target, SRC=source).
+    Z(depth) 기반 컬러맵으로 모양 파악 용이. XY·XZ 두 평면 동시 출력 가능.
+
+    Args:
+        ref_corr: Target 쪽 대응점 (N, 3)
+        src_corr: Source 쪽 대응점 (N, 3)
+        output_path: 저장 경로 (.png 등)
+        max_points: 스캐터에 쓸 최대 점 수 (초과 시 랜덤 샘플)
+        line_step: 연결선 그릴 때 간격 (step 마다 한 줄)
+        projection: "xz" | "xy" | "yz" (show_both_xy_xz=False일 때만 사용)
+        title: 그래프 제목
+        figsize: figure 크기
+        dpi: 저장 해상도
+        show_both_xy_xz: True면 XY·XZ 각각 별도 파일로 저장 (_xy.png, _xz.png)
+        color_by_depth: True면 Z값으로 컬러맵 (모양 파악용)
+    """
+    # matplotlib import 전에 DEBUG 로그 억제 (data path, CONFIGDIR, CACHEDIR 등)
+    for _name in ("matplotlib", "matplotlib.font_manager", "matplotlib.pyplot"):
+        logging.getLogger(_name).setLevel(logging.WARNING)
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ref_corr = np.asarray(ref_corr)
+    src_corr = np.asarray(src_corr)
+    n = len(ref_corr)
+    if n != len(src_corr):
+        raise ValueError("ref_corr and src_corr must have same length")
+
+    if n == 0:
+        logger.warning("visualize_3d_correspondences: no points, skip")
+        return
+
+    corr_idx = (
+        np.random.choice(n, min(max_points, n), replace=False)
+        if n > max_points
+        else np.arange(n)
+    )
+    line_indices = corr_idx[::line_step] if line_step > 0 else corr_idx
+
+    # Z(depth) 기반 컬러
+    if color_by_depth:
+        z_all = np.concatenate([ref_corr[:, 2], src_corr[:, 2]])
+        vmin, vmax = z_all.min(), z_all.max()
+        if vmax - vmin < 1e-6:
+            vmin, vmax = vmin - 1, vmax + 1
+        c_ref = ref_corr[corr_idx, 2]
+        c_src = src_corr[corr_idx, 2]
+        cmap = "viridis"
+    else:
+        c_ref, c_src = "blue", "red"
+        cmap = None
+        vmin = vmax = None
+
+    def draw_projection(ax, xi: int, yi: int, xlabel: str, ylabel: str, proj_name: str):
+        if color_by_depth:
+            s0 = ax.scatter(
+                ref_corr[corr_idx, xi],
+                ref_corr[corr_idx, yi],
+                c=c_ref,
+                s=5,
+                alpha=0.8,
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+                label="REF (target)",
+            )
+            s1 = ax.scatter(
+                src_corr[corr_idx, xi],
+                src_corr[corr_idx, yi],
+                c=c_src,
+                s=5,
+                alpha=0.8,
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+                label="SRC (source)",
+            )
+        else:
+            ax.scatter(
+                ref_corr[corr_idx, xi],
+                ref_corr[corr_idx, yi],
+                c="blue",
+                s=5,
+                alpha=0.8,
+                label="REF (target)",
+            )
+            ax.scatter(
+                src_corr[corr_idx, xi],
+                src_corr[corr_idx, yi],
+                c="red",
+                s=5,
+                alpha=0.8,
+                label="SRC (source)",
+            )
+        for i in line_indices:
+            ax.plot(
+                [ref_corr[i, xi], src_corr[i, xi]],
+                [ref_corr[i, yi], src_corr[i, yi]],
+                "g-",
+                alpha=0.2,
+                linewidth=0.5,
+            )
+        ax.set_title(f"{proj_name} ({n:,} pairs)")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.legend(markerscale=2, fontsize=8)
+        ax.set_aspect("equal")
+        ax.grid(True, alpha=0.3)
+
+    if show_both_xy_xz:
+        # XY·XZ 각각 별도 파일로 저장
+        out_path = Path(output_path)
+        base, ext = out_path.parent / out_path.stem, out_path.suffix
+        paths = [f"{base}_xy{ext}", f"{base}_xz{ext}"]
+        for path, (xi, yi, xl, yl, name) in [
+            (paths[0], (0, 1, "X", "Y", "XY (top-down)")),
+            (paths[1], (0, 2, "X", "Z", "XZ (side)")),
+        ]:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+            draw_projection(ax, xi, yi, xl, yl, name)
+            if color_by_depth and ax.collections:
+                from matplotlib.cm import ScalarMappable
+                from matplotlib.colors import Normalize
+                sm = ScalarMappable(cmap=plt.cm.viridis, norm=Normalize(vmin=vmin, vmax=vmax))
+                sm.set_array([])
+                fig.colorbar(sm, ax=ax, label="Z (depth)")
+            fig.tight_layout()
+            fig.savefig(path, dpi=dpi, bbox_inches="tight")
+            plt.close(fig)
+            logger.info(f"3D correspondence plot saved: {path}")
+        return
+    else:
+        axes = projection.lower()
+        if axes == "xz":
+            xi, yi = 0, 2
+            xlabel, ylabel = "X", "Z"
+        elif axes == "xy":
+            xi, yi = 0, 1
+            xlabel, ylabel = "X", "Y"
+        elif axes == "yz":
+            xi, yi = 1, 2
+            xlabel, ylabel = "Y", "Z"
+        else:
+            raise ValueError('projection must be "xz", "xy", or "yz"')
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        draw_projection(ax, xi, yi, xlabel, ylabel, projection.upper())
+        if color_by_depth and ax.collections:
+            fig.colorbar(ax.collections[0], ax=ax, label="Z (depth)")
+        if title:
+            ax.set_title(title)
+
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    logger.info(f"3D correspondence plot saved: {output_path}")

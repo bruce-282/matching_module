@@ -66,7 +66,7 @@ def get_teaser_solver(noise_bound: float = 0.05) -> teaserpp_python.RobustRegist
     solver_params.rotation_estimation_algorithm = \
         teaserpp_python.RobustRegistrationSolver.ROTATION_ESTIMATION_ALGORITHM.GNC_TLS
     solver_params.rotation_gnc_factor = 1.4
-    solver_params.rotation_max_iterations = 10000
+    solver_params.rotation_max_iterations = 50000
     solver_params.rotation_cost_threshold = 1e-12
     solver = teaserpp_python.RobustRegistrationSolver(solver_params)
     return solver

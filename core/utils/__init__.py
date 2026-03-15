@@ -11,6 +11,7 @@ from .processing_utils import (
     set_null_pred,
     registration_ransac_based_on_correspondence,
     solve_rigid_transform_between_points,
+    chamfer_distance,
 )
 from .pcd_utils import (
     load_ply_as_image,
@@ -68,6 +69,7 @@ __all__ = [
     "depth_estimation_histogram",
     "registration_ransac_based_on_correspondence",
     "solve_rigid_transform_between_points",
+    "chamfer_distance",
     "se3_to_homography",
     "homography_to_se3",
     "decompose_homography",

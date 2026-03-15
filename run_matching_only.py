@@ -12,6 +12,8 @@ import argparse
 import shutil
 import warnings
 import logging
+from typing import Optional
+
 import yaml
 import copy
 import numpy as np
@@ -52,6 +54,39 @@ def build_virtual_intrinsic(width, height):
     f = float(max(width, height))
     cx, cy = width / 2.0, height / 2.0
     return np.array([[f, 0, cx], [0, f, cy], [0, 0, 1]])
+
+
+def save_matching_results_yaml(
+    output_path: str,
+    base_name: str,
+    matches: dict,
+    filtered_matches: dict,
+    result_3d: Optional[dict],
+) -> None:
+    """주요 매칭 결과를 YAML 파일로 저장."""
+    data = {
+        "base_name": base_name,
+        "matches_2d": {
+            "total": len(matches["keypoints0"]),
+            "filtered": len(filtered_matches["filtered_kpts0"]),
+        },
+    }
+    if result_3d is not None:
+        data["pose_estimation"] = {
+            "method": result_3d.get("pose_estimation_method", "unknown"),
+            "num_inliers": result_3d.get("num_inliers"),
+            "fitness": result_3d.get("fitness"),
+            "inlier_rmse": result_3d.get("inlier_rmse"),
+        }
+        if "chamfer_distance" in result_3d:
+            data["chamfer_distance"] = float(result_3d["chamfer_distance"])
+        # 4x4 transformation matrix (list of lists for YAML)
+        T = result_3d["transformation"]
+        data["transformation"] = (
+            T.tolist() if hasattr(T, "tolist") else [[float(x) for x in row] for row in T]
+        )
+    with open(output_path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
 def ply_to_images(ply_path, config):
@@ -265,11 +300,29 @@ def main():
                 logger.info(f"Saved transformed source PLY: {ply_path}")
             except Exception as e:
                 logger.warning(f"Failed to save transformed source PLY: {e}")
+        # 주요 결과 YAML 저장
+        result_yaml_path = os.path.join(output_dir, f"{base_name}_result.yaml")
+        try:
+            save_matching_results_yaml(
+                result_yaml_path,
+                base_name,
+                matches,
+                filtered_matches,
+                result_3d,
+            )
+            logger.info(f"Saved matching results: {result_yaml_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save result YAML: {e}")
+
+        chamfer_str = ""
+        if result_3d is not None and "chamfer_distance" in result_3d:
+            chamfer_str = f", chamfer_distance={result_3d['chamfer_distance']:.4f}"
         logger.info(
             f"Success - {base_name}: "
             f"matches={len(matches['keypoints0'])}, "
             f"filtered={len(filtered_matches['filtered_kpts0'])}, "
             f"3d_result={'OK' if result_3d is not None else 'N/A'}"
+            f"{chamfer_str}"
         )
         return matches, filtered_matches, result_3d
 
