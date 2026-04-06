@@ -29,10 +29,10 @@ classifiers = [
 ]
 dynamic = ["dependencies"]
 
+# optional: TEASER++ 는 로컬 경로 의존성이라 절대경로 file:// 를 넣으면
+# 외부 resolver(uv/pip)가 extra 미사용 시에도 메타데이터 검증에서 실패할 수 있음.
+# 필요 시: pip install ./third_party/TEASER-plusplus  (또는 해당 레포 빌드 안내 따름)
 [project.optional-dependencies]
-teaserpp = [
-    "teaserpp-python @ file:///home/jtkim/sources/matching_module/third_party/TEASER-plusplus",
-]
 # RoMaV2 가속용 (CUDA fused local correlation kernel, Linux 전용)
 fused-local-corr = [
     "fused-local-corr ; sys_platform == 'linux'",
