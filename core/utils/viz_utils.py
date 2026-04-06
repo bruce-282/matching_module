@@ -139,90 +139,98 @@ def visualize_keypoints(
     return img
 
 
-def warp_images(
+def warp_images_overlap(
     img0: np.ndarray,
     img1: np.ndarray,
     homography: np.ndarray,
-    pointL_pos: Dict[str, float],
-    pointR_pos: Dict[str, float],
-    pointU_pos: Dict[str, float],
-    point_radius: int = 10,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Warps images using homography transformation and creates overlapped visualization.
-
-    Args:
-        img0: numpy array representing the first image (target).
-        img1: numpy array representing the second image (source).
-        homography: 3x3 homography matrix for transformation.
-        pointL_pos: Point L position configuration
-        pointR_pos: Point R position configuration
-        pointU_pos: Point U position configuration
-        point_radius: radius for drawing points
-
-    Returns:
-        A tuple containing (overlapped_image, warped_image).
+    Homography로 source(img1)를 target(img0) 크기에 맞춰 워프하고 알파 블렌드 오버랩.
+    앵커 점(L/R/U)는 그리지 않음 — warp_images()에서 선택적으로 추가.
     """
     h0, w0, _ = img0.shape
-    h1, w1, _ = img1.shape
-
-    # Homography inverse transformation
     H_inv = np.linalg.inv(homography)
     warped_image = cv2.warpPerspective(img1, H_inv, (w0, h0))
 
-    # Transform 2D points using homography
-    point1_coords = np.array(
-        [[w1 * pointL_pos["x_ratio"], h1 * pointL_pos["y_ratio"], 1]],
-        dtype=np.float32,
-    )
-    transformed_point1 = H_inv @ point1_coords.T
-    transformed_point1 = transformed_point1 / transformed_point1[2]  # Normalize
-
-    point2_coords = np.array(
-        [[w1 * pointR_pos["x_ratio"], h1 * pointR_pos["y_ratio"], 1]],
-        dtype=np.float32,
-    )
-    transformed_point2 = H_inv @ point2_coords.T
-    transformed_point2 = transformed_point2 / transformed_point2[2]  # Normalize
-
-    point3_coords = np.array(
-        [[w1 * pointU_pos["x_ratio"], h1 * pointU_pos["y_ratio"], 1]],
-        dtype=np.float32,
-    )
-    transformed_point3 = H_inv @ point3_coords.T
-    transformed_point3 = transformed_point3 / transformed_point3[2]  # Normalize
-
-    # Create overlapped image by blending warped image onto target image
     warped_gray = cv2.cvtColor(warped_image, cv2.COLOR_RGB2GRAY)
     mask = warped_gray > 0
 
     overlapped_image = img0.copy().astype(np.float32)
     warped_float = warped_image.astype(np.float32)
 
-    # Alpha blending: 0.7 for original, 0.3 for warped
     alpha = 0.7
     overlapped_image[mask] = (
         alpha * overlapped_image[mask] + (1 - alpha) * warped_float[mask]
     )
 
-    # Draw red circles for the transformed points
-    points = [
-        (int(transformed_point1[0][0]), int(transformed_point1[1][0])),
-        (int(transformed_point2[0][0]), int(transformed_point2[1][0])),
-        (int(transformed_point3[0][0]), int(transformed_point3[1][0])),
-    ]
-
-    for x, y in points:
-        if 0 <= x < overlapped_image.shape[1] and 0 <= y < overlapped_image.shape[0]:
-            cv2.circle(overlapped_image, (x, y), point_radius, (255, 0, 0), -1)
-
-    # Add red tint to overlapping areas for better visibility
     red_overlay = np.zeros_like(overlapped_image)
-    red_overlay[mask] = [50, 0, 0]  # Red tint
+    red_overlay[mask] = [50, 0, 0]
     overlapped_image = np.clip(overlapped_image + red_overlay, 0, 255)
     overlapped_image = overlapped_image.astype(np.uint8)
 
     return overlapped_image, warped_image
+
+
+def warp_images(
+    img0: np.ndarray,
+    img1: np.ndarray,
+    homography: np.ndarray,
+    pointL_pos: Optional[Dict[str, float]] = None,
+    pointR_pos: Optional[Dict[str, float]] = None,
+    pointU_pos: Optional[Dict[str, float]] = None,
+    point_radius: Optional[int] = None,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """
+    Warps images using homography and creates overlapped visualization.
+
+    pointL_pos / pointR_pos / pointU_pos / point_radius 를 넘기지 않거나
+    하나라도 None이면 앵커 원은 그리지 않고 warp_images_overlap 과 동일하게 처리.
+
+    Args:
+        img0: numpy array representing the first image (target).
+        img1: numpy array representing the second image (source).
+        homography: 3x3 homography matrix for transformation.
+        pointL_pos, pointR_pos, pointU_pos: 비율 좌표 (x_ratio, y_ratio). 모두 있을 때만 원 표시.
+        point_radius: 원 반지름. None이면 원 미표시.
+
+    Returns:
+        (overlapped_image, warped_image).
+    """
+    overlapped_image, warped_image = warp_images_overlap(img0, img1, homography)
+
+    draw_points = (
+        pointL_pos is not None
+        and pointR_pos is not None
+        and pointU_pos is not None
+        and point_radius is not None
+    )
+    if not draw_points:
+        return overlapped_image, warped_image
+
+    h1, w1, _ = img1.shape
+    H_inv = np.linalg.inv(homography)
+    overlapped_float = overlapped_image.astype(np.float32)
+
+    def _transform_pt(pos: Dict[str, float]) -> Tuple[int, int]:
+        coords = np.array(
+            [[w1 * pos["x_ratio"], h1 * pos["y_ratio"], 1]],
+            dtype=np.float32,
+        )
+        t = H_inv @ coords.T
+        t = t / t[2]
+        return int(t[0][0]), int(t[1][0])
+
+    points = [
+        _transform_pt(pointL_pos),
+        _transform_pt(pointR_pos),
+        _transform_pt(pointU_pos),
+    ]
+
+    for x, y in points:
+        if 0 <= x < overlapped_float.shape[1] and 0 <= y < overlapped_float.shape[0]:
+            cv2.circle(overlapped_float, (x, y), int(point_radius), (255, 0, 0), -1)
+
+    return overlapped_float.astype(np.uint8), warped_image
 
 
 def visualize_3d_correspondences(

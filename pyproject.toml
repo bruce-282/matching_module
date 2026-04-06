@@ -33,6 +33,10 @@ dynamic = ["dependencies"]
 teaserpp = [
     "teaserpp-python @ file:///home/jtkim/sources/matching_module/third_party/TEASER-plusplus",
 ]
+# RoMaV2 가속용 (CUDA fused local correlation kernel, Linux 전용)
+fused-local-corr = [
+    "fused-local-corr ; sys_platform == 'linux'",
+]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

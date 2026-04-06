@@ -27,6 +27,7 @@ sys.path.insert(0, str(project_root))
 # 로거 설정
 from core.utils.logger_utils import setup_logger
 from .models.roma import Roma
+from .models.roma_v2 import RomaV2
 from ..utils.image_utils import resize_image, process_depth_map, apply_roi_mask
 from ..utils.viz_utils import visualize_matches, warp_images, visualize_3d_correspondences
 from ..utils.processing_utils import (
@@ -78,7 +79,9 @@ class Matcher:
             # 매칭 설정
             "max_keypoints": 3000,
             "match_threshold": 0.2,
+            "model_type": "roma",  # "roma" | "roma_v2"
             "model_name": "roma_outdoor.pth",
+            "roma_v2_setting": "precise",  # RoMaV2: precise, fast, turbo, base
             # RANSAC 설정
             "ransac_method": "CV2_USAC_MAGSAC",
             "ransac_reproj_threshold": 12.0,
@@ -125,15 +128,22 @@ class Matcher:
 
         # 모델 초기화
         init_start_time = time.time()
-        conf = Roma.default_conf.copy()
-        conf["max_keypoints"] = self.config["max_keypoints"]
-        conf["match_threshold"] = self.config["match_threshold"]
-        conf["model_name"] = self.config["model_name"]
-        self.model = Roma(conf)
+        model_type = self.config.get("model_type", "roma")
+        if model_type == "roma_v2":
+            conf = RomaV2.default_conf.copy()
+            conf["max_keypoints"] = self.config["max_keypoints"]
+            conf["setting"] = self.config.get("roma_v2_setting", "precise")
+            self.model = RomaV2(conf)
+        else:
+            conf = Roma.default_conf.copy()
+            conf["max_keypoints"] = self.config["max_keypoints"]
+            conf["match_threshold"] = self.config["match_threshold"]
+            conf["model_name"] = self.config["model_name"]
+            self.model = Roma(conf)
 
         model_init_time = time.time() - init_start_time
         self.logger.info(
-            f"Model initialization completed (time: {model_init_time:.3f} seconds)"
+            f"Model initialization completed ({model_type}, time: {model_init_time:.3f} seconds)"
         )
 
         self._warmup_model()
@@ -531,40 +541,47 @@ class Matcher:
             self.logger.error("Source image not found")
             return
 
+        if ransac_result is None:
+            # 호출부에서 RANSAC 결과 없이 부를 수 있음 — 워프/3D 시각화 생략 (경고 불필요)
+            self.logger.debug("visualize_results: ransac_result is None, skip")
+            return
+
+        # homography만 있고 3D 매칭 끄면: 워프 오버랩만 (앵커 점은 config에 L/R/U+radius 모두 있을 때만)
+        H = ransac_result.get("homography")
         if (
-            ransac_result["homography"]
+            H is not None
             and not self.config["enable_3d_matching"]
             and (
                 self.config["save_essential"] == "all"
                 or self.config["save_essential"] == "2d"
             )
         ):
-
             try:
                 warp_result = warp_images(
                     target_image,
                     source_image,
-                    ransac_result["homography"],
-                    pointL_pos=self.config["pointL_pos"],
-                    pointR_pos=self.config["pointR_pos"],
-                    pointU_pos=self.config["pointU_pos"],
-                    point_radius=self.config["point_radius"],
+                    H,
+                    pointL_pos=self.config.get("pointL_pos"),
+                    pointR_pos=self.config.get("pointR_pos"),
+                    pointU_pos=self.config.get("pointU_pos"),
+                    point_radius=self.config.get("point_radius"),
                 )
                 output_file = str(
                     self.output_path / f"{result_image_name}_warped_overlapped.png"
                 )
-                if self.config["result_image_brighten"] > 0:
+                if self.config.get("result_image_brighten", 0) > 0:
                     warp_contrast = cv2.convertScaleAbs(
                         warp_result[0], alpha=self.config["result_image_contrast"]
                     )
                 else:
                     warp_contrast = warp_result[0]
                 cv2.imwrite(output_file, cv2.cvtColor(warp_contrast, cv2.COLOR_RGB2BGR))
-                self.logger.debug(f"warped image saved: {output_file}")
-
+                self.logger.info(f"Warp overlap saved: {output_file}")
             except Exception as e:
                 self.logger.error(f"image warping failed: {e}")
-                return
+
+        if result3d is None:
+            return
 
         result1_3d, result2_3d, result3_3d = result3d
         center_point_3d = (result1_3d + result2_3d + result3_3d) / 3
@@ -1218,6 +1235,7 @@ class Matcher:
         result2_3d = None
         result3_3d = None
         plane_normal = None
+        transform_matrix = None  # enable_3d_matching True일 때만 설정, visualize_results에 전달
 
         # if self.config["result_image_contrast"] > 0:
         #     target_texture = cv2.convertScaleAbs(
