@@ -25,8 +25,11 @@ matplotlib<3.9
 seaborn
 tifffile
 
-# 3D 시각화 (TSDF + 카메라 포즈)
+# visualization
 rerun-sdk
 
+# huggingface
 huggingface_hub
+
+# image codecs
 imagecodecs
