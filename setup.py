@@ -10,13 +10,17 @@ from setuptools import find_packages, setup
 
 
 def _discover_packages():
-    """core/datasets + vendored RoMa(romatch). third_party 루트 패키지는 제외."""
+    """core/datasets + vendored RoMa(romatch) + RoMaV2(romav2). third_party 루트 패키지는 제외."""
     base = find_packages(
         include=("core*", "datasets*"),
         exclude=("third_party",),
     )
     roma = find_packages(where="third_party/RoMa", include=("romatch*",))
-    return list(dict.fromkeys(base + roma))
+    romav2 = find_packages(
+        where="core/matchers/models/RoMaV2/src",
+        include=("romav2*",),
+    )
+    return list(dict.fromkeys(base + roma + romav2))
 
 
 setup(

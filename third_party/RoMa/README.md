@@ -31,6 +31,8 @@ In your python environment (tested on Linux python 3.10), run:
 pip install -e .
 ```
 
+Weights (optional offline / wheel bundling): put `*.pth` files under `romatch/weights/` (see `romatch/weights/download.sh`). Those files are **gitignored** but, if present when **matching-module** is built, they are **included in the wheel** via setuptools `package-data`.
+
 ### As part of `matching-module`
 If you install the parent **matching-module** package from that repository (`pip install` / `uv pip install` from the repo root), `romatch` is **bundled** into the same distribution — you do **not** need a separate `pip install -e .` here unless you are developing RoMa in isolation.
 ## Demo / How to Use

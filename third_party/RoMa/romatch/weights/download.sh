@@ -1,19 +1,19 @@
 #!/bin/bash
 
-# Ensure the script is run from the "weights" folder
+# Run from this directory (romatch/weights).
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 if [[ "$PWD" != "$SCRIPT_DIR" ]]; then
-    echo "Please run this script from the 'weights' directory."
+    echo "Please run this script from the 'romatch/weights' directory."
     exit 1
 fi
 
-# URLs of the weight files
-MINIMA_RoMa='https://github.com/LSXI7/storage/releases/download/MINIMA/minima_roma.pth'
-DINOV2_PRETRAIN=https://huggingface.co/zgcr654321/pretrained_models/resolve/cc2e7aace55d6f06716dcf444c29d97bac0a99da/dinov2_pretrain_official_pytorch_weights/dinov2_vitl14_pretrain.pth
-# Download the files
+# Default names match core.matchers.models.roma.Roma (roma_outdoor.pth, dinov2_vitl14_pretrain.pth)
+ROMA_OUTDOOR="https://github.com/Parskatt/storage/releases/download/roma/roma_outdoor.pth"
+DINOV2_VITL14="https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_pretrain.pth"
+
 FILES=(
-    "$MINIMA_RoMa"
-    "$DINOV2_PRETRAIN"
+    "$ROMA_OUTDOOR"
+    "$DINOV2_VITL14"
 )
 
 for FILE_URL in "${FILES[@]}"; do

@@ -15,10 +15,6 @@ from core.matchers.models.base_model import BaseModel
 from core.utils.image_utils import load_image
 from core.utils.viz_utils import visualize_matches
 
-# RoMaV2 패키지 경로 추가
-romav2_src_path = Path(__file__).parent / "RoMaV2" / "src"
-sys.path.insert(0, str(romav2_src_path))
-
 from romav2 import RoMaV2
 from romav2.device import device as romav2_device
 

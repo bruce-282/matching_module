@@ -43,8 +43,8 @@ dependencies = {file = ["requirements.txt"]}
 
 # setup.py 의 _discover_packages() 와 동일하게 유지 (정적 분석·도구용)
 [tool.setuptools.packages.find]
-where = [".", "third_party/RoMa"]
-include = ["core*", "datasets*", "romatch*"]
+where = [".", "third_party/RoMa", "core/matchers/models/RoMaV2/src"]
+include = ["core*", "datasets*", "romatch*", "romav2*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.py", "*.pth", "*.ckpt"]
