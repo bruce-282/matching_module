@@ -17,7 +17,7 @@ def _discover_packages():
     )
     roma = find_packages(where="third_party/RoMa", include=("romatch*",))
     romav2 = find_packages(
-        where="core/matchers/models/RoMaV2/src",
+        where="third_party/RoMaV2/src",
         include=("romav2*",),
     )
     return list(dict.fromkeys(base + roma + romav2))

@@ -28,6 +28,8 @@ git submodule update --init --recursive
 
 **CI / 릴리스 휠**: GitHub Actions에서는 `actions/checkout`에 `fetch-depth: 0`과 `submodules: recursive`를 주는 것이 안전합니다(얕은 클론에서 서브모듈 SHA를 못 찾는 경우 방지). 이 저장소의 `.github/workflows/ci.yml`을 참고하면 됩니다.
 
+**자동화의 한계**: `pip install git+https://...` 로 설치할 때 **Git 서브모듈은 자동으로 초기화되지 않습니다.** 그래서 RoMaV2 등이 서브모듈이면 소스 트리가 비어 있을 수 있습니다. 대응은 (1) 클론 시 `--recurse-submodules` / `git submodule update --init --recursive`, (2) CI에서 빌드한 **휠을 릴리스 아티팩트로 받아 설치**하는 방식이 일반적입니다. 빌드 전 준비는 `./scripts/prepare_build.sh` 한 번이면 되고, RoMa 가중치까지 휠에 넣으려면 `DOWNLOAD_ROMA_WEIGHTS=1 ./scripts/prepare_build.sh` 후 `python -m build` 하면 됩니다. GitHub에서는 **Actions → “Release wheel”** 워크플로(태그 푸시 또는 수동 실행, 선택적으로 가중치 포함)로 `dist/` 아티팩트를 받을 수 있습니다.
+
 ### 2. 가상환경 생성 및 활성화
 ```bash
 python -m venv .venv

@@ -26,8 +26,7 @@ sys.path.insert(0, str(project_root))
 
 # 로거 설정
 from core.utils.logger_utils import setup_logger
-from .models.roma import Roma
-from .models.roma_v2 import RomaV2
+from .models.roma import Roma, RomaV2, _ROMAV2_TYPES
 from ..utils.image_utils import resize_image, process_depth_map, apply_roi_mask
 from ..utils.viz_utils import visualize_matches, warp_images, visualize_3d_correspondences
 from ..utils.processing_utils import (
@@ -128,8 +127,8 @@ class Matcher:
 
         # 모델 초기화
         init_start_time = time.time()
-        model_type = self.config.get("model_type", "roma")
-        if model_type == "roma_v2":
+        model_type = str(self.config.get("model_type", "roma")).lower().strip()
+        if model_type in _ROMAV2_TYPES:
             conf = RomaV2.default_conf.copy()
             conf["max_keypoints"] = self.config["max_keypoints"]
             conf["setting"] = self.config.get("roma_v2_setting", "precise")

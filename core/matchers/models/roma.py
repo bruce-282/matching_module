@@ -1,21 +1,29 @@
+"""RoMa (romatch) 및 RoMa V2 (romav2, matching-module 번들) feature matcher."""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import torch
 from PIL import Image
-import argparse
-import numpy as np
-
-import logging
 
 from ...utils import MODEL_REPO_ID
-from .base_model import BaseModel
 from ...utils.image_utils import load_image
 from ...utils.viz_utils import visualize_matches
+from .base_model import BaseModel
 
-from romatch.models.model_zoo import roma_model
+# -----------------------------------------------------------------------------
+# RoMa / RoMa V2 공통
+# -----------------------------------------------------------------------------
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+_ROMAV2_TYPES = frozenset({"roma_v2", "romav2"})
 
 
 def _resolve_roma_weight_file(filename: str) -> Optional[Path]:
@@ -32,6 +40,14 @@ def _resolve_roma_weight_file(filename: str) -> Optional[Path]:
     return None
 
 
+# -----------------------------------------------------------------------------
+# RoMa (romatch)
+# -----------------------------------------------------------------------------
+
+
+from romatch.models.model_zoo import roma_model  # noqa: E402  # after path / deps
+
+
 class Roma(BaseModel):
     default_conf = {
         "name": "two_view_pipeline",
@@ -46,7 +62,6 @@ class Roma(BaseModel):
         "image1",
     ]
 
-    # Initialize the line matcher
     def _init(self, conf):
         logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger(__name__)
@@ -54,9 +69,8 @@ class Roma(BaseModel):
         local_model_path = _resolve_roma_weight_file(self.conf["model_name"])
         local_dinov2_path = _resolve_roma_weight_file(self.conf["model_utils_name"])
 
-        # 로컬 파일이 있으면 사용, 없으면 다운로드
         if local_model_path is not None:
-            logger.info(f"Local model file used: {local_model_path}")
+            logger.info("Local model file used: %s", local_model_path)
             model_path = str(local_model_path)
         else:
             model_path = self._download_model(
@@ -65,7 +79,7 @@ class Roma(BaseModel):
             )
 
         if local_dinov2_path is not None:
-            logger.info(f"Local DINOv2 file used: {local_dinov2_path}")
+            logger.info("Local DINOv2 file used: %s", local_dinov2_path)
             dinov2_weights = str(local_dinov2_path)
         else:
             dinov2_weights = self._download_model(
@@ -75,7 +89,6 @@ class Roma(BaseModel):
                 ),
             )
         logger.debug("Loading Roma model")
-        # load the model
         weights = torch.load(model_path, map_location="cpu")
         dinov2_weights = torch.load(dinov2_weights, map_location="cpu")
 
@@ -104,9 +117,7 @@ class Roma(BaseModel):
         W_A, H_A = img0.size
         W_B, H_B = img1.size
 
-        # Match
         warp, certainty = self.net.match(img0, img1, device=device)
-        # Sample matches for estimation
         matches, certainty = self.net.sample(
             warp, certainty, num=self.conf["max_keypoints"]
         )
@@ -120,95 +131,228 @@ class Roma(BaseModel):
         return pred
 
 
-def main():
-    """Roma 모델을 테스트하는 main 함수"""
-    parser = argparse.ArgumentParser(description="Roma 모델을 사용한 이미지 매칭")
-    parser.add_argument(
-        "--image0",
-        type=str,
-        default="datasets/source.png",
-        help="첫 번째 이미지 경로",
-    )
-    parser.add_argument(
-        "--image1",
-        type=str,
-        default="datasets/target.png",
-        help="두 번째 이미지 경로",
-    )
-    parser.add_argument(
-        "--output", type=str, default="roma_matches.png", help="결과 이미지 저장 경로"
-    )
-    parser.add_argument(
-        "--max_keypoints", type=int, default=1000, help="최대 키포인트 수"
-    )
-    parser.add_argument(
-        "--confidence_threshold", type=float, default=0.5, help="신뢰도 임계값"
-    )
+# -----------------------------------------------------------------------------
+# RoMa V2 (romav2)
+# -----------------------------------------------------------------------------
 
-    args = parser.parse_args()
 
-    print(f"image0: {args.image0}")
-    print(f"image1: {args.image1}")
-    print(f"device: {device}")
+from romav2 import RoMaV2 as _RoMaV2Net  # noqa: E402
+from romav2.device import device as romav2_device  # noqa: E402
 
-    try:
-        # Load images
-        image0 = load_image(args.image0)
-        image1 = load_image(args.image1)
 
-        # Roma model initialization
-        print("Roma model initialization in progress...")
-        conf = Roma.default_conf.copy()
-        conf["max_keypoints"] = args.max_keypoints
-        roma_model = Roma(conf)
+class RomaV2(BaseModel):
+    """RoMaV2 — BaseModel 래퍼 (romav2 패키지)."""
 
-        # Matching execution
-        print("Image matching in progress...")
-        data = {
-            "image0": image0.unsqueeze(0),  # Add batch dimension
-            "image1": image1.unsqueeze(0),
+    default_conf = {
+        "max_keypoints": 5000,
+        "setting": "turbo",
+        "compile": True,
+    }
+    required_inputs = [
+        "image0",
+        "image1",
+    ]
+
+    def _init(self, conf):
+        logging.getLogger(__name__).debug("Loading RoMaV2 model...")
+        torch.set_float32_matmul_precision("highest")
+        cfg = _RoMaV2Net.Cfg(
+            setting=conf["setting"],
+            compile=conf["compile"],
+        )
+        self.net = _RoMaV2Net(cfg=cfg)
+        self.net.to(device)
+        self.net.eval()
+        logging.getLogger(__name__).debug("Load RoMaV2 model done.")
+
+    def _forward(self, data):
+        img0 = data["image0"]
+        img1 = data["image1"]
+
+        H_A, W_A = img0.shape[-2], img0.shape[-1]
+        H_B, W_B = img1.shape[-2], img1.shape[-1]
+
+        if img0.dim() == 3:
+            img0_input = img0.unsqueeze(0)
+        else:
+            img0_input = img0
+        if img1.dim() == 3:
+            img1_input = img1.unsqueeze(0)
+        else:
+            img1_input = img1
+        img0_input = img0_input.to(romav2_device)
+        img1_input = img1_input.to(romav2_device)
+
+        preds = self.net.match(img0_input, img1_input)
+
+        matches, overlaps, _precision_ab, _precision_ba = self.net.sample(
+            preds, self.conf["max_keypoints"]
+        )
+
+        H_out = self.net.H_hr if self.net.H_hr is not None else self.net.H_lr
+        W_out = self.net.W_hr if self.net.W_hr is not None else self.net.W_lr
+
+        kpts0, kpts1 = self.net.to_pixel_coordinates(
+            matches, H_out, W_out, H_out, W_out
+        )
+
+        scale_x_A = W_A / W_out
+        scale_y_A = H_A / H_out
+        scale_x_B = W_B / W_out
+        scale_y_B = H_B / H_out
+
+        kpts0_scaled = kpts0.clone()
+        kpts0_scaled[..., 0] *= scale_x_A
+        kpts0_scaled[..., 1] *= scale_y_A
+
+        kpts1_scaled = kpts1.clone()
+        kpts1_scaled[..., 0] *= scale_x_B
+        kpts1_scaled[..., 1] *= scale_y_B
+
+        return {
+            "keypoints0": kpts0_scaled,
+            "keypoints1": kpts1_scaled,
+            "mconf": overlaps,
         }
 
-        result = roma_model(data)
 
-        # Result output
+# -----------------------------------------------------------------------------
+# CLI
+# -----------------------------------------------------------------------------
+
+
+def _parse_demo_args():
+    p = argparse.ArgumentParser(
+        description="RoMa (romatch) / RoMa V2 (romav2) 이미지 매칭 데모"
+    )
+    p.add_argument(
+        "--roma-v2",
+        action="store_true",
+        help="RoMaV2(romav2)로 실행 (기본은 RoMa/romatch)",
+    )
+    p.add_argument("--image0", type=str, default="")
+    p.add_argument("--image1", type=str, default="")
+    p.add_argument("--output", type=str, default="")
+    p.add_argument("--max_keypoints", type=int, default=-1)
+    p.add_argument("--confidence_threshold", type=float, default=0.5)
+    p.add_argument(
+        "--setting",
+        type=str,
+        default="fast",
+        choices=["precise", "fast", "turbo", "base"],
+        help="--roma-v2 일 때만 사용",
+    )
+    return p.parse_args()
+
+
+def main():
+    """콘솔 스크립트 `roma-match` 및 `python -m core.matchers.models.roma` 공통 진입점."""
+    args = _parse_demo_args()
+
+    if args.roma_v2:
+        image0 = args.image0 or "third_party/RoMaV2/assets/toronto_A.jpg"
+        image1 = args.image1 or "third_party/RoMaV2/assets/toronto_B.jpg"
+        output = args.output or "roma_v2_matches.png"
+        max_k = args.max_keypoints if args.max_keypoints > 0 else 3000
+
+        print("image0:", image0)
+        print("image1:", image1)
+        print("device:", device)
+
+        try:
+            image0_t = load_image(image0)
+            image1_t = load_image(image1)
+            print("RoMaV2 model initialization in progress...")
+            conf = RomaV2.default_conf.copy()
+            conf["max_keypoints"] = max_k
+            conf["setting"] = args.setting
+            model = RomaV2(conf)
+            print("Image matching in progress...")
+            result = model(
+                {"image0": image0_t.unsqueeze(0), "image1": image1_t.unsqueeze(0)}
+            )
+            keypoints0 = result["keypoints0"]
+            keypoints1 = result["keypoints1"]
+            confidence = result["mconf"]
+            print("Matching completed!")
+            print("Total matches:", len(keypoints0))
+            print("Average confidence:", torch.mean(confidence).item())
+            high_conf_mask = confidence > args.confidence_threshold
+            h0 = keypoints0[high_conf_mask]
+            h1 = keypoints1[high_conf_mask]
+            hs = confidence[high_conf_mask]
+            img0_np = (image0_t.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+            img1_np = (image1_t.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+            visualize_matches(
+                img0_np,
+                img1_np,
+                h0.cpu().numpy() if torch.is_tensor(h0) else h0,
+                h1.cpu().numpy() if torch.is_tensor(h1) else h1,
+                hs.cpu().numpy() if torch.is_tensor(hs) else hs,
+                output,
+            )
+            print("Test completed successfully!")
+        except Exception as e:
+            print("Error occurred:", e)
+            import traceback
+
+            traceback.print_exc()
+        return
+
+    # RoMa (romatch) demo
+    image0 = args.image0 or "datasets/source.png"
+    image1 = args.image1 or "datasets/target.png"
+    output = args.output or "roma_matches.png"
+    max_k = args.max_keypoints if args.max_keypoints > 0 else 1000
+
+    print("image0:", image0)
+    print("image1:", image1)
+    print("device:", device)
+
+    try:
+        image0_t = load_image(image0)
+        image1_t = load_image(image1)
+        print("Roma model initialization in progress...")
+        conf = Roma.default_conf.copy()
+        conf["max_keypoints"] = max_k
+        roma = Roma(conf)
+        print("Image matching in progress...")
+        result = roma(
+            {"image0": image0_t.unsqueeze(0), "image1": image1_t.unsqueeze(0)}
+        )
         keypoints0 = result["keypoints0"]
         keypoints1 = result["keypoints1"]
         confidence = result["mconf"]
-
-        print(f"Matching completed!")
-        print(f"Total matches: {len(keypoints0)}")
-        print(f"Average confidence: {torch.mean(confidence).item():.3f}")
-        print(f"Max confidence: {torch.max(confidence).item():.3f}")
-        print(f"Min confidence: {torch.min(confidence).item():.3f}")
-
-        # 신뢰도 임계값 이상의 매칭만 필터링
+        print("Matching completed!")
+        print("Total matches:", len(keypoints0))
+        print("Average confidence:", torch.mean(confidence).item())
         high_conf_mask = confidence > args.confidence_threshold
         high_conf_kpts0 = keypoints0[high_conf_mask]
         high_conf_kpts1 = keypoints1[high_conf_mask]
         high_conf_scores = confidence[high_conf_mask]
-
-        print(f"Confidence {args.confidence_threshold} or higher matches: {len(high_conf_kpts0)}")
-
-        # 결과 시각화
-        print("Visualizing results...")
+        print(
+            "Confidence %s or higher matches: %s"
+            % (args.confidence_threshold, len(high_conf_kpts0))
+        )
         visualize_matches(
-            args.image0,
-            args.image1,
+            image0,
+            image1,
             high_conf_kpts0,
             high_conf_kpts1,
             high_conf_scores,
-            args.output,
+            output,
         )
-
         print("Test completed successfully!")
-
     except Exception as e:
-        print(f"Error occurred: {e}")
+        print("Error occurred:", e)
         import traceback
 
         traceback.print_exc()
 
 
 if __name__ == "__main__":
+    # 직접 실행 시 레포 루트를 path에 넣어 core.* / romatch import 가능하게
+    _root = Path(__file__).resolve().parent.parent.parent.parent
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
     main()

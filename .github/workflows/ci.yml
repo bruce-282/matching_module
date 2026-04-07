@@ -23,6 +23,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Prepare tree (idempotent; checkout already fetches submodules)
+        run: ./scripts/prepare_build.sh
+        env:
+          SKIP_SUBMODULES: "1"
+
       - name: Install build tools
         run: pip install --upgrade pip build
 

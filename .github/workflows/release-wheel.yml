@@ -1,0 +1,53 @@
+# 태그 또는 수동 실행으로 휠 빌드 후 아티팩트 업로드.
+# pip install git+... 는 서브모듈을 자동으로 못 가져오므로, 배포는 이 휠(또는 사내 레지스트리)을 쓰는 편이 일관됨.
+name: Release wheel
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_roma_weights:
+        description: "RoMa .pth 를 휠에 포함 (느리고 용량 큼)"
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (submodules, full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Prepare tree (submodules)
+        run: ./scripts/prepare_build.sh
+        env:
+          SKIP_SUBMODULES: "1"
+
+      - name: Download RoMa weights (optional)
+        if: github.event_name == 'workflow_dispatch' && inputs.include_roma_weights
+        run: ./scripts/prepare_build.sh
+        env:
+          SKIP_SUBMODULES: "1"
+          DOWNLOAD_ROMA_WEIGHTS: "1"
+
+      - name: Install build tools
+        run: pip install --upgrade pip build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.sha }}
+          path: dist/*
