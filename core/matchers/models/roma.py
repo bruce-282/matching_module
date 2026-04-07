@@ -1,4 +1,3 @@
-import sys
 from pathlib import Path
 
 import torch
@@ -13,8 +12,6 @@ from .base_model import BaseModel
 from ...utils.image_utils import load_image
 from ...utils.viz_utils import visualize_matches
 
-roma_path = Path(__file__).parent.parent.parent.parent / "third_party/RoMa"
-sys.path.append(str(roma_path))
 from romatch.models.model_zoo import roma_model
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

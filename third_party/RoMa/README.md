@@ -30,6 +30,9 @@ In your python environment (tested on Linux python 3.10), run:
 ```bash
 pip install -e .
 ```
+
+### As part of `matching-module`
+If you install the parent **matching-module** package from that repository (`pip install` / `uv pip install` from the repo root), `romatch` is **bundled** into the same distribution — you do **not** need a separate `pip install -e .` here unless you are developing RoMa in isolation.
 ## Demo / How to Use
 We provide two demos in the [demos folder](demo).
 Here's the gist of it:
