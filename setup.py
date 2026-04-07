@@ -28,6 +28,14 @@ setup(
     include_package_data=True,
     package_data={
         "*": ["*.py", "*.pth", "*.ckpt"],
+        # romatch 패키지 루트가 아닌 하위 weights/ 는 명시해야 휠에 포함됨
+        "romatch": [
+            "weights/*.pth",
+            "weights/*.pt",
+            "weights/*.ckpt",
+            "weights/*.txt",
+            "weights/*.sh",
+        ],
     },
     entry_points={
         "console_scripts": [

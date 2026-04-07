@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 import torch
 from PIL import Image
@@ -15,6 +16,20 @@ from ...utils.viz_utils import visualize_matches
 from romatch.models.model_zoo import roma_model
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _resolve_roma_weight_file(filename: str) -> Optional[Path]:
+    """휠에 포함된 romatch/weights 우선, 이전 레이아웃(third_party/RoMa/weights) 호환."""
+    import romatch
+
+    bundled = Path(romatch.__file__).resolve().parent / "weights" / filename
+    if bundled.is_file():
+        return bundled
+    repo_root = Path(__file__).resolve().parents[3]
+    legacy = repo_root / "third_party" / "RoMa" / "weights" / filename
+    if legacy.is_file():
+        return legacy
+    return None
 
 
 class Roma(BaseModel):
@@ -36,20 +51,11 @@ class Roma(BaseModel):
         logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger(__name__)
 
-        # 로컬 모델 파일 경로 확인
-        local_model_path = (
-            Path(__file__).parent.parent.parent
-            / "third_party/RoMa/weights"
-            / self.conf["model_name"]
-        )
-        local_dinov2_path = (
-            Path(__file__).parent.parent.parent
-            / "third_party/RoMa/weights"
-            / self.conf["model_utils_name"]
-        )
+        local_model_path = _resolve_roma_weight_file(self.conf["model_name"])
+        local_dinov2_path = _resolve_roma_weight_file(self.conf["model_utils_name"])
 
         # 로컬 파일이 있으면 사용, 없으면 다운로드
-        if local_model_path.exists():
+        if local_model_path is not None:
             logger.info(f"Local model file used: {local_model_path}")
             model_path = str(local_model_path)
         else:
@@ -58,7 +64,7 @@ class Roma(BaseModel):
                 filename="{}/{}".format(Path(__file__).stem, self.conf["model_name"]),
             )
 
-        if local_dinov2_path.exists():
+        if local_dinov2_path is not None:
             logger.info(f"Local DINOv2 file used: {local_dinov2_path}")
             dinov2_weights = str(local_dinov2_path)
         else:

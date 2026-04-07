@@ -48,6 +48,13 @@ include = ["core*", "datasets*", "romatch*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.py", "*.pth", "*.ckpt"]
+"romatch" = [
+    "weights/*.pth",
+    "weights/*.pt",
+    "weights/*.ckpt",
+    "weights/*.txt",
+    "weights/*.sh",
+]
 
 [project.scripts]
 roma-match = "core.matchers.roma:main"
