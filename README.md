@@ -10,6 +10,24 @@ git clone <repository-url>
 cd matching_module
 ```
 
+**서브모듈**(예: `RoMaV2` 등)을 쓰는 경우, 클론 시부터 받거나 클론 후 한 번 초기화해야 소스·휠 빌드에 파일이 들어갑니다.
+
+```bash
+# 권장: 한 번에
+git clone --recurse-submodules <repository-url>
+
+# 이미 클론한 경우
+git submodule update --init --recursive
+```
+
+또는 루트에서:
+
+```bash
+./scripts/init_submodules.sh
+```
+
+**CI / 릴리스 휠**: GitHub Actions에서는 `actions/checkout`에 `fetch-depth: 0`과 `submodules: recursive`를 주는 것이 안전합니다(얕은 클론에서 서브모듈 SHA를 못 찾는 경우 방지). 이 저장소의 `.github/workflows/ci.yml`을 참고하면 됩니다.
+
 ### 2. 가상환경 생성 및 활성화
 ```bash
 python -m venv .venv
