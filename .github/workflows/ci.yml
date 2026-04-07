@@ -1,0 +1,30 @@
+# 서브모듈(RoMaV2 등)이 있으면 shallow clone만 하면 커밋이 안 맞거나 빈 디렉터리로 빌드될 수 있음.
+# fetch-depth: 0 + submodules: recursive 로 CI/릴리스 휠 빌드와 동일하게 맞춘다.
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (submodules, full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools
+        run: pip install --upgrade pip build
+
+      - name: Build sdist and wheel
+        run: python -m build
