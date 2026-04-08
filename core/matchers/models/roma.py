@@ -250,8 +250,8 @@ def main():
     args = _parse_demo_args()
 
     if args.roma_v2:
-        image0 = args.image0 or "third_party/RoMaV2/assets/toronto_A.jpg"
-        image1 = args.image1 or "third_party/RoMaV2/assets/toronto_B.jpg"
+        image0 = args.image0 or "datasets/source.png"
+        image1 = args.image1 or "datasets/target.png"
         output = args.output or "roma_v2_matches.png"
         max_k = args.max_keypoints if args.max_keypoints > 0 else 3000
 

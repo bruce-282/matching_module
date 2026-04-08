@@ -1,4 +1,4 @@
-# 서브모듈(RoMaV2 등)이 있으면 shallow clone만 하면 커밋이 안 맞거나 빈 디렉터리로 빌드될 수 있음.
+# 서브모듈을 쓰는 경우 shallow clone에서 커밋이 안 맞을 수 있음. romav2는 pip 빌드 시 Git에서 받음.
 # fetch-depth: 0 + submodules: recursive 로 CI/릴리스 휠 빌드와 동일하게 맞춘다.
 name: CI
 

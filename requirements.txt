@@ -3,7 +3,11 @@ torchvision
 torchaudio
 numpy==1.26.3
 opencv-python
-Pillow>=8.0.0
+# romav2 upstream은 pillow>=12 요구; 최소 12로 맞춤
+Pillow>=12.0.0
+
+# RoMa V2 매처 (소스는 Git 태그 고정; PyPI 패키지명 romav2)
+romav2 @ git+https://github.com/Parskatt/RoMaV2.git@v2.0.1
 
 # Deep learning dependencies
 einops

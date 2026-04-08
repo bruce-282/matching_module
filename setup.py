@@ -10,17 +10,13 @@ from setuptools import find_packages, setup
 
 
 def _discover_packages():
-    """core/datasets + vendored RoMa(romatch) + RoMaV2(romav2). third_party 루트 패키지는 제외."""
+    """core/datasets + vendored RoMa(romatch). romav2는 requirements.txt Git 의존성으로 설치."""
     base = find_packages(
         include=("core*", "datasets*"),
         exclude=("third_party",),
     )
     roma = find_packages(where="third_party/RoMa", include=("romatch*",))
-    romav2 = find_packages(
-        where="third_party/RoMaV2/src",
-        include=("romav2*",),
-    )
-    return list(dict.fromkeys(base + roma + romav2))
+    return list(dict.fromkeys(base + roma))
 
 
 setup(
@@ -28,7 +24,7 @@ setup(
     version="0.1.0",
     description="Image matching module using Roma model",
     packages=_discover_packages(),
-    python_requires=">=3.9,<3.12",
+    python_requires=">=3.10,<3.12",
     include_package_data=True,
     package_data={
         "*": ["*.py", "*.pth", "*.ckpt"],

@@ -2,6 +2,8 @@
 
 Roma 모델을 사용한 이미지 매칭 및 RANSAC 필터링 모듈입니다.
 
+**요구 사항:** Python **3.10 이상**, **3.12 미만** (`romav2` upstream과 맞춤).
+
 ## 설치 방법
 
 ### 1. 저장소 클론
@@ -10,7 +12,7 @@ git clone <repository-url>
 cd matching_module
 ```
 
-**서브모듈**(예: `RoMaV2` 등)을 쓰는 경우, 클론 시부터 받거나 클론 후 한 번 초기화해야 소스·휠 빌드에 파일이 들어갑니다.
+**RoMa V2**(`romav2`)는 `requirements.txt`에 **Git URL**(예: `Parskatt/RoMaV2@v2.0.1`)로 선언되어 있어 `pip install -r requirements.txt` 또는 **matching-module 설치 시** 함께 받아집니다. 별도 `third_party` 소스 트리는 필요 없습니다. (다른 **서브모듈**을 쓰는 경우에는 아래처럼 초기화하세요.)
 
 ```bash
 # 권장: 한 번에
@@ -28,7 +30,7 @@ git submodule update --init --recursive
 
 **CI / 릴리스 휠**: GitHub Actions에서는 `actions/checkout`에 `fetch-depth: 0`과 `submodules: recursive`를 주는 것이 안전합니다(얕은 클론에서 서브모듈 SHA를 못 찾는 경우 방지). 이 저장소의 `.github/workflows/ci.yml`을 참고하면 됩니다.
 
-**자동화의 한계**: `pip install git+https://...` 로 설치할 때 **Git 서브모듈은 자동으로 초기화되지 않습니다.** 그래서 RoMaV2 등이 서브모듈이면 소스 트리가 비어 있을 수 있습니다. 대응은 (1) 클론 시 `--recurse-submodules` / `git submodule update --init --recursive`, (2) CI에서 빌드한 **휠을 릴리스 아티팩트로 받아 설치**하는 방식이 일반적입니다. 빌드 전 준비는 `./scripts/prepare_build.sh` 한 번이면 되고, RoMa 가중치까지 휠에 넣으려면 `DOWNLOAD_ROMA_WEIGHTS=1 ./scripts/prepare_build.sh` 후 `python -m build` 하면 됩니다. GitHub에서는 **Actions → “Release wheel”** 워크플로(태그 푸시 또는 수동 실행, 선택적으로 가중치 포함)로 `dist/` 아티팩트를 받을 수 있습니다.
+**자동화의 한계**: `pip install git+...`(부모 레포만) 할 때 **Git 서브모듈**은 초기화되지 않습니다. 서브모듈을 쓰는 경우 `(1)` 클론 시 `--recurse-submodules` / `git submodule update --init --recursive`, `(2)` CI의 `actions/checkout`에서 `submodules: recursive` 등이 필요합니다. `romav2`는 **PyPI 메타데이터의 직접 URL 의존성**으로 끌어오므로 서브모듈과 별개입니다. RoMa 가중치 번들·릴리스 휠은 `./scripts/prepare_build.sh`, `DOWNLOAD_ROMA_WEIGHTS=1`, **Actions → “Release wheel”** 를 참고하세요.
 
 ### 2. 가상환경 생성 및 활성화
 ```bash
