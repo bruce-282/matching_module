@@ -4,7 +4,7 @@
 
 set -e
 cd "$(dirname "$0")/../.."
-CONFIG="configs/SL_ch_260315/matcher.config.yaml"
+CONFIG="configs/SL_ch_260315/matcher_roma_v2.config.config.yaml"
 PLY_DIR="datasets/SL_ch_260315"
 RESULT_DIR="output/SL_ch_260315"
 OUTPUT_DIR="output/SL_ch_260315"
