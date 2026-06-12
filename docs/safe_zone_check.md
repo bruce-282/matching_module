@@ -97,8 +97,15 @@ safe_zones:
 | `res.error_message` | `point {L\|R} [x, y, z] is outside its safe zone` |
 | `res.details` | `{"point": "L"\|"R", "position": [x, y, z]}` (벗어난 포인트와 좌표) |
 
-> 그 외 일반 매칭/깊이 계산 실패는 `error_code=MatcherErrorCode.MATCHING_FAILED` 로
-> 반환됩니다.
+> safe zone 외의 실패도 예외를 던지지 않고 같은 방식으로 실패 `MatchResult` 를
+> 반환하되, **종류별로 코드가 구분**됩니다.
+>
+> | `error_code` | 의미 |
+> |------|------|
+> | `SAFE_ZONE_VIOLATION` | anchor 가 safe zone 을 벗어남 (`details={"point","position"}`) |
+> | `DEPTH_CALCULATION_FAILED` | anchor depth 계산 결과가 없음(None) |
+> | `STABLE_DEPTH_RANGE_EXCEEDED` | depth 가 안정 범위를 벗어남 (`details={"point","depth_diff","stable_range"}`) |
+> | `MATCHING_FAILED` | 그 외 매칭 실패 (2D/3D 매칭·필터링 등) |
 
 `run_matcher.py` 처럼 호출 측은 `success` 로 분기하여 아래 한 줄을 ERROR 로 기록합니다.
 
@@ -124,9 +131,8 @@ if not res.success:
 use(res.point_l, res.point_r, res.point_u, res.plane_normal)
 ```
 
-> 에러 코드는 `core/matchers/errors.py` 의 `MatcherErrorCode` 에 정의됩니다. 현재는 safe
-> zone 위반(`SAFE_ZONE_VIOLATION`)과 일반 실패(`MATCHING_FAILED`)가 정의되어 있으며,
-> 다른 실패 유형도 동일한 스킴으로 코드를 추가할 수 있습니다.
+> 에러 코드는 `core/matchers/errors.py` 의 `MatcherErrorCode` 에 정의됩니다. 다른 실패
+> 유형도 동일한 스킴으로 코드를 추가할 수 있습니다.
 
 ## 구현 위치
 

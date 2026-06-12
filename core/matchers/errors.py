@@ -27,7 +27,9 @@ class MatcherErrorCode(str, Enum):
     """매처 실패 유형 코드. (str 기반이라 로그/JSON 직렬화에 그대로 사용 가능)"""
 
     SAFE_ZONE_VIOLATION = "SAFE_ZONE_VIOLATION"  # anchor 가 safe zone 을 벗어남
-    MATCHING_FAILED = "MATCHING_FAILED"  # 그 외 매칭/깊이 계산 실패 (일반 실패)
+    DEPTH_CALCULATION_FAILED = "DEPTH_CALCULATION_FAILED"  # anchor depth 계산 결과 없음(None)
+    STABLE_DEPTH_RANGE_EXCEEDED = "STABLE_DEPTH_RANGE_EXCEEDED"  # depth 가 안정 범위를 벗어남
+    MATCHING_FAILED = "MATCHING_FAILED"  # 그 외 매칭 실패 (일반 실패)
 
 
 class MatcherError(Exception):

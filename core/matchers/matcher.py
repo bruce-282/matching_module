@@ -1284,15 +1284,22 @@ class Matcher:
                 # Depth 계산 결과 검증
                 if calculated_depths is None:
                     raise MatcherError(
-                        MatcherErrorCode.MATCHING_FAILED,
+                        MatcherErrorCode.DEPTH_CALCULATION_FAILED,
                         "Anchor depth calculation failed: None",
                     )
 
                 if any(d is None for d in calculated_depths):
                     raise MatcherError(
-                        MatcherErrorCode.MATCHING_FAILED,
+                        MatcherErrorCode.DEPTH_CALCULATION_FAILED,
                         f"Anchor depth calculation failed: "
                         f"L={calculated_depths[0]}, R={calculated_depths[1]}, U={calculated_depths[2]}",
+                        details={
+                            "depths": {
+                                "L": calculated_depths[0],
+                                "R": calculated_depths[1],
+                                "U": calculated_depths[2],
+                            }
+                        },
                     )
 
                 # 앵커 포인트 데이터 구성
@@ -1324,9 +1331,14 @@ class Matcher:
 
                     if depth_diff > stable_range:
                         raise MatcherError(
-                            MatcherErrorCode.MATCHING_FAILED,
+                            MatcherErrorCode.STABLE_DEPTH_RANGE_EXCEEDED,
                             f"Out of stable depth range {anchor['name']}: "
                             f"{depth_diff:.1f}mm > {stable_range}mm",
+                            details={
+                                "point": anchor["name"],
+                                "depth_diff": float(depth_diff),
+                                "stable_range": float(stable_range),
+                            },
                         )
 
                     self.logger.debug(
