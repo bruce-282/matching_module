@@ -115,3 +115,22 @@ except Exception as e:
 - `core/matchers/matcher.py`
   - `Matcher.check_safe_zones(result1_3d, result2_3d)` — L/R 검사, 실패 시 raise
   - `run_pipeline` 내 anchor 3D 확정 직후 호출
+
+## 좌표 프레임 / 설계 근거
+
+Safe zone 검사는 매칭 transform을 적용하지 않고, `result_3d`(카메라 프레임)를
+고정된 safe zone과 **카메라 프레임에서 직접 비교**합니다. 근거는 다음과 같습니다.
+
+- 로봇 베이스는 고정(절대 기준)이고, 카메라↔로봇 **hand-eye 캘리브레이션을 알고 있다.**
+- 따라서 카메라 프레임은 고정 로봇 프레임과 알려진 고정 변환으로 연결되며, safe zone은
+  실질적으로 **"고정 로봇 기준의 절대 안전영역"** 이다.
+- 카메라가 움직이면 **재캘리브레이션**으로 카메라↔로봇 관계를 갱신하므로, object별
+  transform 보정(transform⁻¹)이나 safe zone 재생성 없이 검사가 유효하다.
+- camera↔robot 변환(hand-eye)은 **로봇이 실제로 anchor를 집으러 갈 때(하류)** 적용된다.
+  이 모듈의 safe zone 검사 자체는 카메라 프레임 안에서 자기완결적이다.
+
+## 향후 작업 (TODO)
+
+- [ ] **hand-eye 캘리브레이션 파싱**: 백엔드가 저장하는 카메라↔로봇 hand-eye
+      캘리브레이션 정보를 매처에서 파싱한다. **(형식 추후 확정)** 로봇 프레임으로의
+      결과 출력 또는 로봇 프레임 기준 safe zone 검사가 필요할 때 사용.
