@@ -1,8 +1,9 @@
 """Matcher 파이프라인 결과 객체.
 
-``run_pipeline`` 은 예외를 던지지 않고 **항상 ``MatchResult`` 를 반환**한다.
-상위(in-process) 호출 측은 try/except 없이 ``success`` 플래그로 분기하고, 실패 시
-사내 표준 ``error_code`` (``ErrorCode``) 로 원인을 구분한다.
+``run_pipeline`` 은 파이프라인 처리 중의 실패(매칭/depth/safe zone)를 예외 대신
+**``MatchResult`` 로 반환**한다(초기 인자/config 검증 단계의 비정상 입력은 예외 가능).
+상위(in-process) 호출 측은 ``success`` 플래그로 분기하고, 실패 시 사내 표준
+``error_code`` (``ErrorCode``) 로 원인을 구분한다.
 
 예시::
 

@@ -1180,7 +1180,8 @@ class Matcher:
             output_dir: 출력 디렉토리
 
         Returns:
-            MatchResult. 예외를 던지지 않고 항상 결과 객체를 반환한다.
+            MatchResult. 파이프라인 처리 중의 실패(매칭/depth/safe zone)는 예외 대신
+            결과 객체로 반환한다. (초기 인자/config 검증 단계의 비정상 입력은 예외 가능.)
             - 성공: success=True, point_l/point_r/point_u/plane_normal 채워짐
             - 실패: success=False, error_code(ErrorCode)/error_message/details 채워짐
               (safe zone 위반 시 error_code=SAFE_ZONE_VIOLATION,

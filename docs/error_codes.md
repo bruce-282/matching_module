@@ -69,7 +69,8 @@ ErrorCode.SAFE_ZONE_VIOLATION.code_str("3")   # -> 30504
 
 ## `run_pipeline` 이 실제로 반환하는 코드
 
-`Matcher.run_pipeline` 은 예외를 던지지 않고 항상 `MatchResult` 를 반환한다(아래 참고).
+`Matcher.run_pipeline` 은 파이프라인 처리 중의 실패를 예외 대신 `MatchResult` 로 반환한다
+(아래 참고. 초기 인자/config 검증 단계의 비정상 입력은 예외가 날 수 있음).
 **현재 파이프라인이 실패 시 사용하는 코드**는 다음 4개다.
 
 | `error_code` | 발생 조건 | `details` |
