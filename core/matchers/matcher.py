@@ -1032,6 +1032,9 @@ class Matcher:
         """camera_calibration(hand-eye, 4x4) 값을 파싱한다. 없거나 형식이 잘못되면
         경고를 남기고 None 을 반환한다(검사는 직접 비교로 fallback).
 
+        camera_calibration 은 **카메라 -> 로봇(base)** 변환이다 (= inv(T_base2cam)).
+        즉 p_robot = camera_calibration @ p_cam 이므로, 역행렬 없이 그대로 적용한다.
+
         Args:
             raw: 4x4 중첩 리스트 / 길이 16 시퀀스 / (4,4) ndarray, 또는 None
             source: 로그용 출처 문자열 (예: "runtime config", "template")

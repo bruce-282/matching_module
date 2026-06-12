@@ -67,7 +67,8 @@ safe_zones:
     euler: [2.7066, 0.5931, -0.1091]
 
 # (선택) hand-eye 캘리브레이션 — 있으면 로봇 프레임에서 검사한다.
-# 템플릿(teaching) 카메라 -> 로봇, 4x4 (template_param 에 저장)
+# 카메라 -> 로봇(base) 변환 (= inv(T_base2cam)). p_robot = camera_calibration @ p_cam.
+# 여기 것은 템플릿(teaching) 카메라 -> 로봇, 4x4 (template_param 에 저장)
 camera_calibration:
   - [1.0, 0.0, 0.0, 0.0]
   - [0.0, 1.0, 0.0, 0.0]
@@ -79,6 +80,10 @@ camera_calibration:
 (동일한 4x4 형식)으로 전달하며, `Matcher` 생성/`init_config` 시 읽는다. teaching/runtime
 두 캘리브레이션이 **모두 있을 때만** 로봇 프레임 검사가 활성화되고, 없으면 카메라
 프레임에서 직접 비교한다(하위 호환). 4x4 는 중첩 리스트 또는 길이 16 시퀀스 모두 인식.
+
+> **방향 주의**: `camera_calibration` 은 **카메라 → 로봇(base)** 변환이다. 즉
+> `T_cam2base = inv(T_base2cam)` 이며, 카메라 좌표 점을 그대로 곱해 로봇 좌표로 보낸다
+> (`p_robot = camera_calibration @ p_cam`). 검사 코드는 역행렬을 취하지 않고 그대로 적용한다.
 
 ## 결과 (정확한 반환/동작)
 
