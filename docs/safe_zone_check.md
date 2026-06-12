@@ -150,28 +150,6 @@ use(res.point_l, res.point_r, res.point_u, res.plane_normal)
 > 에러 코드는 `core/matchers/error_handler.py` 의 `ErrorCode` (사내 표준) 에
 > 정의됩니다. 전체 코드 표·`MMMSEEE` 인코딩은 [Error Codes](error_codes.md) 참고.
 
-## 구현 위치
-
-- `core/utils/geometry_utils.py`
-  - `euler_to_rotation_matrix(rx, ry, rz)` — Three.js XYZ(intrinsic) 회전행렬
-  - `obb_from_min_max_euler(min, max, euler)` — OBB 를 (center, half, R) 로 변환
-  - `is_point_in_obb(point, center, half, R)` — OBB 내부 판정 (저수준)
-  - `is_point_in_safe_zone(point, min, max, euler)` — OBB 내부 판정 (min/max/euler 입력)
-  - `transform_safe_zone(min, max, euler, T)` — safe zone 을 4x4 로 다른 프레임으로 변환
-  - `transform_point_3d(point, T)` — 3D 포인트에 4x4 동차변환 적용
-  - `as_4x4_matrix(value)` — 중첩 리스트/flat16 → (4,4) 행렬
-- `core/matchers/matcher.py`
-  - `Matcher.check_safe_zones(result1_3d, result2_3d)` — L/R 검사, 실패 시 내부적으로 `MatcherError` raise
-  - `Matcher._safe_zone_calibrations()` / `_parse_camera_calibration()` — hand-eye 캘리브레이션 파싱 (teaching/runtime)
-  - 런타임 캘리브레이션은 `init_config` 에서 config 의 `camera_calibration` 로부터 로드
-  - `run_pipeline` 내 anchor 3D 확정 직후 호출. 경계에서 `MatcherError` 를 잡아 실패 `MatchResult` 로 변환 후 반환
-- `core/matchers/error_handler.py`
-  - `ErrorCode` (사내 표준 에러 코드 enum), `MatchingError` (사내 표준 예외), `MatchingErrorDefinitions` (crp_core 연동)
-- `core/matchers/errors.py`
-  - `MatcherError` (내부 전달용 예외, `error_code`(ErrorCode)/message/details 보유)
-- `core/matchers/results.py`
-  - `MatchResult` (run_pipeline 의 공개 반환 타입; success/point_*/plane_normal/error_code/error_message/severity/details, `code`/`to_error()` 브리지)
-
 ## 좌표 프레임 / 설계 근거
 
 Safe zone 검사는 매칭 transform을 적용하지 않고, 포즈가 적용된 `result_3d`를 고정된
