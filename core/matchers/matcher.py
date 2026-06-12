@@ -53,6 +53,7 @@ from ..utils.geometry_utils import (
     project_open3d_pcd_to_image,
     project_3d_point_to_2d,
     create_transform_matrix_from_vectors,
+    is_point_in_safe_zone,
 )
 
 
@@ -1009,6 +1010,61 @@ class Matcher:
 
         return None
 
+    def check_safe_zones(
+        self, result1_3d: np.ndarray, result2_3d: np.ndarray
+    ) -> None:
+        """
+        매칭으로 구한 anchor 포인트 L, R이 설정된 safe zone(회전 큐보이드, OBB)
+        안에 있는지 검사하는 안전장치(safety guard).
+
+        safe_zones 는 기준 템플릿/월드 좌표(고정 카메라 공간, template_param 의
+        depthmap+intrinsic 으로 역투영한 공간)에 고정으로 정의된 "유효한 영역"이다.
+        매칭으로 추정한 포즈가 잘못되면 anchor 결과(result_3d)가 엉뚱한 위치로
+        날아갈 수 있는데, 이를 모르고 로봇이 그 좌표로 이동하면 이상한 곳에
+        충돌할 수 있다. 이를 막기 위해, 포즈가 이미 적용된 결과(result_3d)를
+        safe zone 에 (매칭 transform 을 적용하지 않고) 그대로 비교한다.
+
+        포인트가 zone 을 벗어나면 Exception 을 발생시켜, depth 계산 실패와 동일하게
+        매칭 실패로 처리되도록 한다. safe zone 은 L, R 두 포인트에만 정의되어 있으며
+        U 포인트는 검사하지 않는다. template_param 에 safe_zones 가 없으면 검사를
+        건너뛴다(하위 호환).
+
+        Args:
+            result1_3d: Point L 의 3D 좌표 [x, y, z]
+            result2_3d: Point R 의 3D 좌표 [x, y, z]
+        """
+        if not self.template_param:
+            return
+
+        # safe_zones 찾기: template_param 최상위 -> template_param.matching_model
+        safe_zones = (
+            self.template_param.get("safe_zones")
+            or self.template_param.get("matching_model", {}).get("safe_zones")
+        )
+        if not safe_zones:
+            self.logger.debug("No safe_zones configured - skipping safe zone check.")
+            return
+
+        # L, R 두 포인트만 각자의 safe zone에 대해 검사 (U는 검사 제외)
+        for name, point_3d in (("L", result1_3d), ("R", result2_3d)):
+            zone = safe_zones.get(name)
+            if not zone:
+                self.logger.debug(f"No safe zone for point {name} - skipping.")
+                continue
+
+            inside = is_point_in_safe_zone(
+                point_3d,
+                np.array(zone["min"], dtype=float),
+                np.array(zone["max"], dtype=float),
+                np.array(zone["euler"], dtype=float),
+            )
+            if not inside:
+                raise Exception(
+                    f"Safe zone check failed: point {name} "
+                    f"{np.asarray(point_3d)} is outside its safe zone"
+                )
+            self.logger.debug(f"Safe zone check passed for point {name}.")
+
     def run_pipeline(
         self,
         target_texture: Optional[np.ndarray] = None,
@@ -1333,6 +1389,11 @@ class Matcher:
             self.logger.debug(
                 f"3D points: pointL: {result1_3d}, pointR: {result2_3d}, pointU: {result3_3d}"
             )
+
+            # Safe zone 안전장치: 포즈가 적용된 anchor 결과 L, R이 템플릿/월드 좌표에
+            # 고정된 safe zone(회전 큐보이드) 안에 있는지 확인하고, 벗어나면(=매칭/포즈
+            # 추정이 잘못되어 엉뚱한 위치) 매칭 실패로 처리한다. (depth 계산 실패와 동일)
+            self.check_safe_zones(result1_3d, result2_3d)
 
             plane_normal = compute_plane_normal(result1_3d, result2_3d, result3_3d)
 

@@ -533,6 +533,73 @@ def create_transform_matrix_from_vectors(
     transform_matrix = np.eye(4)
     transform_matrix[:3, :3] = rotation_matrix
     transform_matrix[:3, 3] = position
-    
+
     return transform_matrix
-    
+
+
+def euler_to_rotation_matrix(rx: float, ry: float, rz: float) -> np.ndarray:
+    """
+    XYZ Euler 각(라디안)으로부터 3x3 회전 행렬을 생성합니다.
+
+    회전은 R = Rx @ Ry @ Rz 로 합성됩니다. 이는 safe_zones 의 euler 를 생성하는
+    프론트엔드(Three.js)의 기본 회전 순서 'XYZ'(Matrix4.makeRotationFromEuler)와
+    동일한 규약이며, 임의 각도에 대해 행렬이 정확히 일치함을 확인하였다.
+    규약상 intrinsic XYZ (= extrinsic ZYX, = scipy Rotation.from_euler('XYZ'))
+    이며, extrinsic XYZ(Rz·Ry·Rx)와는 다르다.
+
+    Args:
+        rx: X축 회전 각 (radian)
+        ry: Y축 회전 각 (radian)
+        rz: Z축 회전 각 (radian)
+
+    Returns:
+        3x3 회전 행렬
+    """
+    cx, sx = np.cos(rx), np.sin(rx)
+    cy, sy = np.cos(ry), np.sin(ry)
+    cz, sz = np.cos(rz), np.sin(rz)
+
+    Rx = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+    Ry = np.array([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+    Rz = np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]])
+
+    return Rx @ Ry @ Rz
+
+
+def is_point_in_safe_zone(
+    point_3d: np.ndarray,
+    zone_min: np.ndarray,
+    zone_max: np.ndarray,
+    euler: np.ndarray,
+) -> bool:
+    """
+    3D 포인트가 방향이 있는 큐보이드(safe zone, OBB) 안에 있는지 판정합니다.
+
+    큐보이드는 두 대각 꼭짓점(min, max)과 중심점 기준 XYZ Euler 회전으로 정의됩니다.
+        center = (min + max) / 2
+        half   = |max - min| / 2
+        R      = euler_to_rotation_matrix(*euler)
+    포인트를 큐보이드 로컬 좌표계로 변환(p_local = R^T @ (point - center)) 한 뒤,
+    모든 축에서 |p_local[i]| <= half[i] 이면 내부로 판정합니다.
+
+    Args:
+        point_3d: 검사할 3D 포인트 [x, y, z]
+        zone_min: 큐보이드 꼭짓점 [x, y, z]
+        zone_max: 반대편 큐보이드 꼭짓점 [x, y, z]
+        euler: 중심점 기준 회전 [rx, ry, rz] (radian)
+
+    Returns:
+        포인트가 큐보이드 내부에 있으면 True, 아니면 False
+    """
+    point_3d = np.asarray(point_3d, dtype=float)
+    zone_min = np.asarray(zone_min, dtype=float)
+    zone_max = np.asarray(zone_max, dtype=float)
+
+    center = (zone_min + zone_max) / 2.0
+    half = np.abs(zone_max - zone_min) / 2.0
+
+    R = euler_to_rotation_matrix(float(euler[0]), float(euler[1]), float(euler[2]))
+    p_local = R.T @ (point_3d - center)
+
+    return bool(np.all(np.abs(p_local) <= half))
+
