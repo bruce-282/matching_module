@@ -251,3 +251,7 @@ transformed_points:
 - **유틸리티 함수 추가**:
   - `clip_pointcloud_by_depth()`: Depth 범위로 포인트 클라우드 클리핑
   - `create_transform_matrix_from_vectors()`: 벡터로부터 변환 행렬 생성
+
+## 추가 문서
+
+- [Safe Zone Check Process](docs/safe_zone_check.md): 매칭 결과 anchor가 유효 영역을 벗어날 때 매칭 실패로 처리하는 안전장치 설명
