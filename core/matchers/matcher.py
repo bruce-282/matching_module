@@ -27,6 +27,7 @@ sys.path.insert(0, str(project_root))
 # 로거 설정
 from core.utils.logger_utils import setup_logger
 from .errors import MatcherError, MatcherErrorCode
+from .results import MatchResult
 from .models.roma import Roma
 from ..utils.image_utils import resize_image, process_depth_map, apply_roi_mask
 from ..utils.viz_utils import visualize_matches, warp_images
@@ -1077,7 +1078,7 @@ class Matcher:
         target_texture_path: Optional[str] = None,
         target_depth_path: Optional[str] = None,
         output_dir: Optional[str] = None,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> MatchResult:
         """
         전체 파이프라인 실행
 
@@ -1091,7 +1092,11 @@ class Matcher:
             output_dir: 출력 디렉토리
 
         Returns:
-            Tuple[result1_3d, result2_3d, result3_3d, plane_normal]
+            MatchResult. 예외를 던지지 않고 항상 결과 객체를 반환한다.
+            - 성공: success=True, point_l/point_r/point_u/plane_normal 채워짐
+            - 실패: success=False, error_code(MatcherErrorCode)/error_message/details 채워짐
+              (safe zone 위반 시 error_code=SAFE_ZONE_VIOLATION,
+               details={"point", "position"}; 그 외는 MATCHING_FAILED)
         """
         # 경로 설정
         if target_texture_path is None or target_texture is None:
@@ -1278,15 +1283,17 @@ class Matcher:
                 )
                 # Depth 계산 결과 검증
                 if calculated_depths is None:
-                    self.logger.error("Anchor depth calculation failed: None")
-                    return None, None, None, None
+                    raise MatcherError(
+                        MatcherErrorCode.MATCHING_FAILED,
+                        "Anchor depth calculation failed: None",
+                    )
 
                 if any(d is None for d in calculated_depths):
-                    self.logger.error(
+                    raise MatcherError(
+                        MatcherErrorCode.MATCHING_FAILED,
                         f"Anchor depth calculation failed: "
-                        f"L={calculated_depths[0]}, R={calculated_depths[1]}, U={calculated_depths[2]}"
+                        f"L={calculated_depths[0]}, R={calculated_depths[1]}, U={calculated_depths[2]}",
                     )
-                    return None, None, None, None
 
                 # 앵커 포인트 데이터 구성
                 anchor_points = [
@@ -1316,11 +1323,11 @@ class Matcher:
                     depth_diff = abs(anchor["pos_3d"][2] - anchor["depth"])
 
                     if depth_diff > stable_range:
-                        self.logger.warning(
+                        raise MatcherError(
+                            MatcherErrorCode.MATCHING_FAILED,
                             f"Out of stable depth range {anchor['name']}: "
-                            f"{depth_diff:.1f}mm > {stable_range}mm"
+                            f"{depth_diff:.1f}mm > {stable_range}mm",
                         )
-                        return None, None, None, None
 
                     self.logger.debug(
                         f"Stable depth {anchor['name']}: diff={depth_diff:.1f}mm <= {stable_range}mm"
@@ -1437,13 +1444,17 @@ class Matcher:
 
             self.logger.info("\n=== Pipeline completed ===")
 
-            return result1_3d, result2_3d, result3_3d, plane_normal
+            return MatchResult.ok(result1_3d, result2_3d, result3_3d, plane_normal)
 
-        except MatcherError:
-            # 코드를 가진 도메인 예외는 그대로 전파 (외부에서 e.code 로 분기)
-            raise
+        except MatcherError as e:
+            # 코드를 가진 도메인 실패(safe zone 위반, 깊이 계산 실패 등)를
+            # 결과 객체로 변환해 반환한다. (예외를 외부로 던지지 않음)
+            self.logger.error(str(e))
+            return MatchResult.fail(e.code, e.message, e.details)
         except Exception as e:
-            raise Exception(f"{e}")
+            # 예상치 못한 실패도 일반 코드(MATCHING_FAILED)로 묶어 결과 객체로 반환한다.
+            self.logger.error(f"Matching failed: {e}")
+            return MatchResult.fail(MatcherErrorCode.MATCHING_FAILED, str(e))
 
     def calculate_3d_points(
         self, result1_3d: np.ndarray, result2_3d: np.ndarray, result3_3d: np.ndarray, camera: Camera

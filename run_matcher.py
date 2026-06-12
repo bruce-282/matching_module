@@ -162,7 +162,7 @@ def main():
             # )
 
             time_start = time.time()
-            result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(
+            result = matcher.run_pipeline(
                 target_texture=target_texture,
                 target_depth=target_depth,
                 source_image=source_image,
@@ -173,18 +173,21 @@ def main():
             time_end = time.time()
             logger.info(f"Total matching time: {time_end - time_start:.3f} seconds")
         except Exception as e:
+            # run_pipeline 은 도메인 실패를 결과 객체로 반환하므로, 여기로 오는 것은
+            # 이미지 로드 등 파이프라인 밖의 예기치 못한 오류뿐이다.
             logger.error(f"{base_name} - {e}")
             continue
 
-        # 결과 출력
-        if all(
-            x is not None for x in [result1_3d, result2_3d, result3_3d, plane_normal]
-        ):
+        # 결과 출력 (예외 없이 결과 객체의 success 로 분기)
+        if result.success:
             logger.info(
-                f"Matching success - {base_name} \n Point L: {result1_3d} \n Point R: {result2_3d} \n Point U: {result3_3d} \n Plane Normal: {plane_normal}"
+                f"Matching success - {base_name} \n Point L: {result.point_l} \n Point R: {result.point_r} \n Point U: {result.point_u} \n Plane Normal: {result.plane_normal}"
             )
         else:
-            logger.error(f"❌ Matching failed - {base_name}")
+            logger.error(
+                f"❌ Matching failed - {base_name} "
+                f"[{result.error_code.value}] {result.error_message}"
+            )
 
     # 메모리 정리
     matcher.cleanup()
