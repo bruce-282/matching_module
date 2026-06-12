@@ -57,6 +57,10 @@ from ..utils.geometry_utils import (
     project_3d_point_to_2d,
     create_transform_matrix_from_vectors,
     is_point_in_safe_zone,
+    is_point_in_obb,
+    transform_safe_zone,
+    as_4x4_matrix,
+    transform_point_3d,
 )
 
 
@@ -142,6 +146,9 @@ class Matcher:
 
         self.camera_target = None
         self.camera_source = None
+        # 현재(runtime) 카메라 hand-eye 캘리브레이션 (current cam -> robot, 4x4).
+        # safe zone 을 로봇 프레임에서 검사할 때 사용. init_config 에서 채워진다.
+        self.runtime_camera_calibration = None
 
         self.init_config(config=config, template_param=template_param)
         # Camera 객체 생성 및 이미지 undistortion
@@ -221,6 +228,12 @@ class Matcher:
         except Exception as e:
             self.logger.error(f"YAML camera target configuration load failed: {e}")
             raise e
+
+        # 현재(runtime) 카메라 hand-eye 캘리브레이션 (current cam -> robot, 4x4).
+        # safe zone 을 로봇 프레임에서 검사하기 위해 모듈 초기화 시 받는다. (선택값)
+        self.runtime_camera_calibration = self._parse_camera_calibration(
+            self.config.get("camera_calibration"), source="runtime config"
+        )
 
 
     def scale_keypoints(self, kpts: torch.Tensor, scale: np.ndarray) -> torch.Tensor:
@@ -1013,6 +1026,54 @@ class Matcher:
 
         return None
 
+    def _parse_camera_calibration(
+        self, raw, source: str
+    ) -> Optional[np.ndarray]:
+        """camera_calibration(hand-eye, 4x4) 값을 파싱한다. 없거나 형식이 잘못되면
+        경고를 남기고 None 을 반환한다(검사는 직접 비교로 fallback).
+
+        Args:
+            raw: 4x4 중첩 리스트 / 길이 16 시퀀스 / (4,4) ndarray, 또는 None
+            source: 로그용 출처 문자열 (예: "runtime config", "template")
+        """
+        if raw is None:
+            return None
+        try:
+            T = as_4x4_matrix(raw)
+            self.logger.info(f"camera_calibration loaded from {source} (4x4).")
+            return T
+        except (ValueError, TypeError) as e:
+            self.logger.warning(f"camera_calibration ({source}) 파싱 실패: {e}")
+            return None
+
+    def _safe_zone_calibrations(self):
+        """safe zone 을 로봇 프레임에서 검사하기 위한 (T_teach, T_runtime) 4x4 쌍을
+        반환한다. 둘 다 있을 때만 쌍을 반환하고, 하나라도 없으면 None 을 반환해
+        카메라 프레임에서 직접 비교한다(하위 호환).
+
+        - T_teach   : 템플릿(teaching) 카메라 -> 로봇. template_param 에서 파싱.
+                      safe_zones(템플릿 프레임)를 로봇 프레임으로 변환하는 데 사용.
+        - T_runtime : 현재(runtime) 카메라 -> 로봇. 모듈 초기화 시 받음.
+                      result_3d(현재 카메라 프레임)를 로봇 프레임으로 변환하는 데 사용.
+        """
+        # teaching(template) 캘리브레이션: template_param 최상위 -> matching_model
+        raw_teach = self.template_param.get("camera_calibration") or (
+            self.template_param.get("matching_model", {}).get("camera_calibration")
+        )
+        T_teach = self._parse_camera_calibration(raw_teach, source="template")
+        T_runtime = self.runtime_camera_calibration
+
+        if T_teach is None and T_runtime is None:
+            return None  # 캘리브레이션 미제공 -> 기존 동작(카메라 프레임 직접 비교)
+        if T_teach is None or T_runtime is None:
+            self.logger.warning(
+                "camera_calibration 이 한쪽(teaching/runtime)만 설정됨 - 로봇 프레임 "
+                "변환을 건너뛰고 카메라 프레임에서 직접 비교합니다."
+            )
+            return None
+
+        return T_teach, T_runtime
+
     def check_safe_zones(
         self, result1_3d: np.ndarray, result2_3d: np.ndarray
     ) -> None:
@@ -1020,21 +1081,26 @@ class Matcher:
         매칭으로 구한 anchor 포인트 L, R이 설정된 safe zone(회전 큐보이드, OBB)
         안에 있는지 검사하는 안전장치(safety guard).
 
-        safe_zones 는 기준 템플릿/월드 좌표(고정 카메라 공간, template_param 의
-        depthmap+intrinsic 으로 역투영한 공간)에 고정으로 정의된 "유효한 영역"이다.
-        매칭으로 추정한 포즈가 잘못되면 anchor 결과(result_3d)가 엉뚱한 위치로
-        날아갈 수 있는데, 이를 모르고 로봇이 그 좌표로 이동하면 이상한 곳에
-        충돌할 수 있다. 이를 막기 위해, 포즈가 이미 적용된 결과(result_3d)를
-        safe zone 에 (매칭 transform 을 적용하지 않고) 그대로 비교한다.
+        safe_zones 는 **템플릿(teaching) 카메라 프레임**에 고정으로 정의된 "유효한
+        영역"이다. 매칭으로 추정한 포즈가 잘못되면 anchor 결과(result_3d)가 엉뚱한
+        위치로 날아갈 수 있는데, 이를 모르고 로봇이 그 좌표로 이동하면 이상한 곳에
+        충돌할 수 있다. 이를 막기 위해 포즈가 이미 적용된 결과(result_3d)를 safe zone
+        과 비교한다.
 
-        포인트가 zone 을 벗어나면 Exception 을 발생시켜, depth 계산 실패와 동일하게
+        **로봇 프레임 검사**: teaching/runtime hand-eye 캘리브레이션(``camera_calibration``,
+        4x4)이 모두 주어지면, result_3d 를 ``M = inv(T_teach) @ T_runtime`` 로 변환해
+        로봇(고정·절대) 프레임 기준으로 비교한다. 카메라가 움직여도 재캘리브레이션으로
+        ``camera_calibration`` 만 갱신하면 검사가 그대로 유효하다. 캘리브레이션이 없으면
+        카메라 프레임에서 직접 비교한다(하위 호환).
+
+        포인트가 zone 을 벗어나면 MatcherError 를 발생시켜, depth 계산 실패와 동일하게
         매칭 실패로 처리되도록 한다. safe zone 은 L, R 두 포인트에만 정의되어 있으며
         U 포인트는 검사하지 않는다. template_param 에 safe_zones 가 없으면 검사를
         건너뛴다(하위 호환).
 
         Args:
-            result1_3d: Point L 의 3D 좌표 [x, y, z]
-            result2_3d: Point R 의 3D 좌표 [x, y, z]
+            result1_3d: Point L 의 3D 좌표 [x, y, z] (현재 카메라 프레임)
+            result2_3d: Point R 의 3D 좌표 [x, y, z] (현재 카메라 프레임)
         """
         if not self.template_param:
             return
@@ -1048,6 +1114,11 @@ class Matcher:
             self.logger.debug("No safe_zones configured - skipping safe zone check.")
             return
 
+        # 로봇 프레임 검사용 캘리브레이션 쌍 (둘 다 있을 때만, 아니면 None=직접 비교)
+        calibrations = self._safe_zone_calibrations()
+        if calibrations is not None:
+            self.logger.debug("Safe zone check in robot frame (hand-eye calibration applied).")
+
         # L, R 두 포인트만 각자의 safe zone에 대해 검사 (U는 검사 제외)
         for name, point_3d in (("L", result1_3d), ("R", result2_3d)):
             zone = safe_zones.get(name)
@@ -1055,13 +1126,26 @@ class Matcher:
                 self.logger.debug(f"No safe zone for point {name} - skipping.")
                 continue
 
-            inside = is_point_in_safe_zone(
-                point_3d,
-                np.array(zone["min"], dtype=float),
-                np.array(zone["max"], dtype=float),
-                np.array(zone["euler"], dtype=float),
-            )
+            zone_min = np.array(zone["min"], dtype=float)
+            zone_max = np.array(zone["max"], dtype=float)
+            euler = np.array(zone["euler"], dtype=float)
+
+            if calibrations is None:
+                # 캘리브레이션 미제공: 카메라 프레임에서 직접 비교 (하위 호환)
+                inside = is_point_in_safe_zone(point_3d, zone_min, zone_max, euler)
+            else:
+                # 다이어그램 그대로: 양쪽을 로봇 프레임으로 모은 뒤 OBB 내부 판정
+                #  - result_3d(현재 카메라 프레임) -> 로봇:  T_runtime
+                #  - safe_zone(템플릿 카메라 프레임) -> 로봇: T_teach
+                T_teach, T_runtime = calibrations
+                point_robot = transform_point_3d(point_3d, T_runtime)
+                center_r, half_r, R_r = transform_safe_zone(
+                    zone_min, zone_max, euler, T_teach
+                )
+                inside = is_point_in_obb(point_robot, center_r, half_r, R_r)
+
             if not inside:
+                # 리포트 좌표는 원본(현재 카메라 프레임) result_3d 를 그대로 사용
                 point = np.asarray(point_3d).tolist()
                 raise MatcherError(
                     ErrorCode.SAFE_ZONE_VIOLATION,

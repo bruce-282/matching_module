@@ -591,15 +591,117 @@ def is_point_in_safe_zone(
     Returns:
         포인트가 큐보이드 내부에 있으면 True, 아니면 False
     """
-    point_3d = np.asarray(point_3d, dtype=float)
+    center, half, R = obb_from_min_max_euler(zone_min, zone_max, euler)
+    return is_point_in_obb(point_3d, center, half, R)
+
+
+def obb_from_min_max_euler(
+    zone_min: np.ndarray, zone_max: np.ndarray, euler: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(min, max, euler) 표현의 OBB 를 (center, half, R) 표현으로 변환합니다.
+
+    Returns:
+        center: 큐보이드 중심 [x, y, z]
+        half: 각 축 반쪽 크기 [x, y, z]
+        R: 중심점 기준 3x3 회전 행렬 (euler 로부터)
+    """
     zone_min = np.asarray(zone_min, dtype=float)
     zone_max = np.asarray(zone_max, dtype=float)
 
     center = (zone_min + zone_max) / 2.0
     half = np.abs(zone_max - zone_min) / 2.0
-
     R = euler_to_rotation_matrix(float(euler[0]), float(euler[1]), float(euler[2]))
-    p_local = R.T @ (point_3d - center)
+    return center, half, R
 
+
+def is_point_in_obb(
+    point_3d: np.ndarray,
+    center: np.ndarray,
+    half: np.ndarray,
+    R: np.ndarray,
+) -> bool:
+    """3D 포인트가 (center, half, R) 로 표현된 방향 큐보이드(OBB) 안에 있는지 판정합니다.
+
+    포인트를 큐보이드 로컬 좌표계로 변환(p_local = R^T @ (point - center)) 한 뒤,
+    모든 축에서 |p_local[i]| <= half[i] 이면 내부로 판정합니다. (center/half/R 가 어떤
+    프레임에 있든, 포인트가 같은 프레임에 있으면 그대로 적용됩니다.)
+    """
+    point_3d = np.asarray(point_3d, dtype=float)
+    center = np.asarray(center, dtype=float)
+    half = np.asarray(half, dtype=float)
+    R = np.asarray(R, dtype=float)
+
+    p_local = R.T @ (point_3d - center)
     return bool(np.all(np.abs(p_local) <= half))
+
+
+def transform_safe_zone(
+    zone_min: np.ndarray,
+    zone_max: np.ndarray,
+    euler: np.ndarray,
+    transform_4x4: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(min, max, euler) 로 정의된 safe zone(OBB)을 4x4 강체변환으로 다른 프레임으로
+    옮긴 (center, half, R) 표현을 반환합니다.
+
+    강체변환 T = [[R_T, t_T], [0, 1]] 에 대해:
+        center' = R_T @ center + t_T
+        R'      = R_T @ R          (방향 합성)
+        half    = half             (강체변환은 크기 보존)
+
+    Args:
+        zone_min, zone_max: 원 프레임에서의 큐보이드 대각 꼭짓점
+        euler: 원 프레임에서의 중심점 기준 회전 [rx, ry, rz] (radian)
+        transform_4x4: 원 프레임 -> 목표 프레임 4x4 변환
+
+    Returns:
+        목표 프레임에서의 (center', half, R')
+    """
+    center, half, R = obb_from_min_max_euler(zone_min, zone_max, euler)
+    T = np.asarray(transform_4x4, dtype=float)
+    R_T = T[:3, :3]
+    t_T = T[:3, 3]
+
+    center_t = R_T @ center + t_T
+    R_t = R_T @ R
+    return center_t, half, R_t
+
+
+def as_4x4_matrix(value) -> np.ndarray:
+    """list-of-lists(4x4) 또는 flat(16개) 값을 (4, 4) 동차변환 행렬로 변환합니다.
+
+    Args:
+        value: 4x4 중첩 리스트, 길이 16 의 1차원 시퀀스, 또는 (4,4)/(16,) ndarray.
+
+    Returns:
+        (4, 4) float ndarray
+
+    Raises:
+        ValueError: 4x4(또는 16개 원소)로 해석할 수 없는 경우.
+    """
+    arr = np.asarray(value, dtype=float)
+    if arr.shape == (4, 4):
+        return arr
+    if arr.size == 16:
+        return arr.reshape(4, 4)
+    raise ValueError(
+        f"4x4 변환 행렬(또는 16개 원소)이 필요하지만 shape {arr.shape} 입니다."
+    )
+
+
+def transform_point_3d(point_3d: np.ndarray, transform_4x4: np.ndarray) -> np.ndarray:
+    """4x4 동차변환을 3D 포인트에 적용합니다.
+
+    Args:
+        point_3d: 변환할 3D 포인트 [x, y, z]
+        transform_4x4: (4, 4) 동차변환 행렬
+
+    Returns:
+        변환된 3D 포인트 [x', y', z']
+    """
+    point_3d = np.asarray(point_3d, dtype=float)
+    T = np.asarray(transform_4x4, dtype=float)
+    p_homo = np.append(point_3d[:3], 1.0)
+    return (T @ p_homo)[:3]
+
 

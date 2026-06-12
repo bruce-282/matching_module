@@ -65,7 +65,20 @@ safe_zones:
     min: [514.7950, 295.5452, 1820.6679]
     max: [661.8052, 180.7805, 1770.4976]
     euler: [2.7066, 0.5931, -0.1091]
+
+# (선택) hand-eye 캘리브레이션 — 있으면 로봇 프레임에서 검사한다.
+# 템플릿(teaching) 카메라 -> 로봇, 4x4 (template_param 에 저장)
+camera_calibration:
+  - [1.0, 0.0, 0.0, 0.0]
+  - [0.0, 1.0, 0.0, 0.0]
+  - [0.0, 0.0, 1.0, 0.0]
+  - [0.0, 0.0, 0.0, 1.0]
 ```
+
+현재(runtime) 카메라 캘리브레이션은 **모듈 설정(config)** 의 `camera_calibration`
+(동일한 4x4 형식)으로 전달하며, `Matcher` 생성/`init_config` 시 읽는다. teaching/runtime
+두 캘리브레이션이 **모두 있을 때만** 로봇 프레임 검사가 활성화되고, 없으면 카메라
+프레임에서 직접 비교한다(하위 호환). 4x4 는 중첩 리스트 또는 길이 16 시퀀스 모두 인식.
 
 ## 결과 (정확한 반환/동작)
 
@@ -141,9 +154,16 @@ use(res.point_l, res.point_r, res.point_u, res.plane_normal)
 
 - `core/utils/geometry_utils.py`
   - `euler_to_rotation_matrix(rx, ry, rz)` — Three.js XYZ(intrinsic) 회전행렬
-  - `is_point_in_safe_zone(point, min, max, euler)` — OBB 내부 판정
+  - `obb_from_min_max_euler(min, max, euler)` — OBB 를 (center, half, R) 로 변환
+  - `is_point_in_obb(point, center, half, R)` — OBB 내부 판정 (저수준)
+  - `is_point_in_safe_zone(point, min, max, euler)` — OBB 내부 판정 (min/max/euler 입력)
+  - `transform_safe_zone(min, max, euler, T)` — safe zone 을 4x4 로 다른 프레임으로 변환
+  - `transform_point_3d(point, T)` — 3D 포인트에 4x4 동차변환 적용
+  - `as_4x4_matrix(value)` — 중첩 리스트/flat16 → (4,4) 행렬
 - `core/matchers/matcher.py`
   - `Matcher.check_safe_zones(result1_3d, result2_3d)` — L/R 검사, 실패 시 내부적으로 `MatcherError` raise
+  - `Matcher._safe_zone_calibrations()` / `_parse_camera_calibration()` — hand-eye 캘리브레이션 파싱 (teaching/runtime)
+  - 런타임 캘리브레이션은 `init_config` 에서 config 의 `camera_calibration` 로부터 로드
   - `run_pipeline` 내 anchor 3D 확정 직후 호출. 경계에서 `MatcherError` 를 잡아 실패 `MatchResult` 로 변환 후 반환
 - `core/matchers/error_handler.py`
   - `ErrorCode` (사내 표준 에러 코드 enum), `MatchingError` (사내 표준 예외), `MatchingErrorDefinitions` (crp_core 연동)
@@ -154,32 +174,43 @@ use(res.point_l, res.point_r, res.point_u, res.plane_normal)
 
 ## 좌표 프레임 / 설계 근거
 
-Safe zone 검사는 매칭 transform을 적용하지 않고, `result_3d`(카메라 프레임)를
-고정된 safe zone과 **카메라 프레임에서 직접 비교**합니다. 근거는 다음과 같습니다.
+Safe zone 검사는 매칭 transform을 적용하지 않고, 포즈가 적용된 `result_3d`를 고정된
+safe zone과 비교합니다. **hand-eye 캘리브레이션이 주어지면 로봇(고정·절대) 프레임에서**,
+없으면 카메라 프레임에서 직접 비교합니다. 근거는 다음과 같습니다.
 
 - 로봇 베이스는 고정(절대 기준)이고, 카메라↔로봇 **hand-eye 캘리브레이션을 알고 있다.**
 - 따라서 카메라 프레임은 고정 로봇 프레임과 알려진 고정 변환으로 연결되며, safe zone은
   실질적으로 **"고정 로봇 기준의 절대 안전영역"** 이다.
-- 카메라가 움직이면 **재캘리브레이션**으로 카메라↔로봇 관계를 갱신하므로, object별
-  transform 보정(transform⁻¹)이나 safe zone 재생성 없이 검사가 유효하다.
-- camera↔robot 변환(hand-eye)은 **로봇이 실제로 anchor를 집으러 갈 때(하류)** 적용된다.
-  이 모듈의 safe zone 검사 자체는 카메라 프레임 안에서 자기완결적이다.
+- 카메라가 움직이면 **재캘리브레이션**으로 카메라↔로봇 관계(`camera_calibration`)를
+  갱신하므로, object별 transform 보정이나 safe zone 재생성 없이 검사가 유효하다.
 
-## 향후 작업 (TODO)
+## 로봇 프레임 검사 (구현됨)
 
 safe zone 검사를 **로봇 프레임**에서 수행하기 위해, 카메라↔로봇 hand-eye 캘리브레이션
-(`camera_calibration` 키, **4x4 변환 행렬**)을 두 종류 받아 사용한다. (safe zone 전용)
+(`camera_calibration` 키, **4x4 변환 행렬**)을 두 종류 받아 사용한다.
 
-- [ ] **템플릿(teaching) 카메라 캘리브레이션**: 템플릿과 함께 백엔드가 저장 →
-      `template_param`에서 파싱. 템플릿 프레임에 정의된 `safe_zones`를 로봇 프레임으로
-      변환하는 데 사용.
-- [ ] **현재(runtime) 카메라 캘리브레이션**: 현재 카메라의 hand-eye (동일한 4x4 형식).
-      **모듈 초기화 시**(`Matcher` 생성 / `init_config`) 받는다. 현재 카메라 프레임의
-      `result_3d`를 로봇 프레임으로 변환하는 데 사용.
-- [ ] 위 두 캘리브레이션으로 `result_3d`와 `safe_zones`를 **모두 로봇 프레임으로 모아서**
-      비교하도록 `check_safe_zones` 를 변경. (현재는 카메라 프레임 직접 비교)
+- [x] **템플릿(teaching) 카메라 캘리브레이션**: `template_param`(최상위 또는
+      `matching_model` 하위)에서 파싱. 템플릿 프레임에 정의된 `safe_zones`를 로봇
+      프레임으로 변환하는 데 사용. (`T_teach`)
+- [x] **현재(runtime) 카메라 캘리브레이션**: 동일한 4x4 형식. **모듈 초기화 시**
+      (`Matcher` 생성 / `init_config`) 모듈 config 의 `camera_calibration` 에서 읽는다.
+      현재 카메라 프레임의 `result_3d`를 로봇 프레임으로 변환하는 데 사용. (`T_runtime`)
+- [x] `check_safe_zones` 가 두 캘리브레이션으로 `result_3d`와 `safe_zones`를 **모두
+      로봇 프레임으로 모아서** OBB 내부를 판정한다. 두 캘리브레이션이 모두 있을 때만
+      활성화되며, 하나라도 없으면 카메라 프레임 직접 비교로 fallback(하위 호환).
 
-### 목표 파이프라인 (로봇 프레임 검사)
+  ```
+  point_robot = T_runtime · result_3d               # 현재 카메라 -> 로봇
+  zone_robot  = transform_safe_zone(zone, T_teach)   # 템플릿 카메라 -> 로봇
+                (center' = R_T·center + t_T, R' = R_T·R, half 불변)
+  inside      = is_point_in_obb(point_robot, *zone_robot)
+  ```
+
+  > 구현: `transform_safe_zone`, `is_point_in_obb`, `transform_point_3d`
+  > (`geometry_utils`). 캘리브레이션 파싱은 `Matcher._parse_camera_calibration` /
+  > `_safe_zone_calibrations`.
+
+### 파이프라인 (로봇 프레임 검사)
 
 ```mermaid
 flowchart TB
@@ -192,7 +223,7 @@ flowchart TB
     RB --> C{"로봇 프레임에서<br/>OBB 내부 판정"}
     TB --> C
     C -->|"안에 있음"| PASS["통과 → 정상 반환"]
-    C -->|"벗어남"| FAIL["매칭 실패<br/>Exception raise"]
+    C -->|"벗어남"| FAIL["매칭 실패<br/>MatchResult.fail<br/>(SAFE_ZONE_VIOLATION)"]
 
     classDef input fill:#fff3cd,stroke:#b8860b,color:#1b1b1b;
     classDef robot fill:#cfe3ff,stroke:#3b6ea5,color:#1b1b1b;
