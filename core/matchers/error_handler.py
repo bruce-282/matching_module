@@ -1,7 +1,7 @@
 """Autochecker matching module error handler.
 
 reconstruction_module 의 ErrorCode 범주 패턴 (0/100/200/300/400/500) 그대로 따라 사내
-일관성 유지. ``MODULE_NAME`` 는 사내 모듈 번호 부여 받는 대로 갱신.
+일관성 유지.
 """
 
 from __future__ import annotations
@@ -16,9 +16,7 @@ from crp_core.error_handler import (
 )
 
 
-# 사내 모듈 번호 (3 자리). reconstruction = "009". autochecker matching 은 미할당이라
-# 임시 "000" placeholder — error code 의 MMMSEEE 인코딩에서 prefix 부분에 들어감.
-# TODO: 사내 모듈 번호 받으면 갱신 (module.py 의 ModuleInfo(id_number=...) 도 같이).
+# 사내 모듈 번호 (3 자리). error code 의 MMMSEEE 인코딩에서 prefix 부분에 들어간다.
 MODULE_NAME = "000"
 
 
