@@ -131,6 +131,7 @@ Safe zone 검사는 매칭 transform을 적용하지 않고, `result_3d`(카메�
 
 ## 향후 작업 (TODO)
 
-- [ ] **hand-eye 캘리브레이션 파싱**: 백엔드가 저장하는 카메라↔로봇 hand-eye
-      캘리브레이션 정보를 매처에서 파싱한다. **(형식 추후 확정)** 로봇 프레임으로의
-      결과 출력 또는 로봇 프레임 기준 safe zone 검사가 필요할 때 사용.
+- [ ] **hand-eye 캘리브레이션 파싱 (safe zone 전용)**: 백엔드가 `camera_calibration`
+      키로 저장하는 **4x4 변환 행렬**(카메라↔로봇 hand-eye)을 매처에서 파싱한다.
+      safe zone 검사 시 `result_3d`(카메라 프레임)를 로봇 프레임으로 변환하여 로봇 기준
+      safe zone과 비교하는 용도로 사용한다. (이 모듈에서는 safe zone 검사에만 필요)
