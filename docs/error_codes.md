@@ -78,7 +78,11 @@ ErrorCode.SAFE_ZONE_VIOLATION.code_str("3")   # -> 30504
 | `SAFE_ZONE_VIOLATION` | anchor L/R 이 safe zone 을 벗어남 | `{"point", "position"}` |
 | `DEPTH_CALCULATION_FAILED` | anchor depth 계산 결과 없음(None) | `{"depths"}` (해당 시) |
 | `DEPTH_OUT_OF_RANGE` | depth 가 안정 범위(`stable_depth_range`)를 초과 | `{"point", "depth_diff", "stable_range"}` |
+| `INVALID_PARAM` | 필수 config/파라미터 키 누락 (예: `target_depth_path`, `enable_3d_matching`) | — |
 | `MATCH_FAILED` | 그 외 매칭 실패 (2D/3D 매칭·필터링, 예기치 못한 오류 등) | — |
+
+> 설정 키 누락은 `KeyError` 를 잡아 `INVALID_PARAM` 으로 분류하며, 누락된 키 이름을
+> `error_message` 에 담는다(예: `missing required config/parameter key: 'enable_3d_matching'`).
 
 > 나머지 코드(`NOT_INITIALIZED`, `FILE_NOT_FOUND`, `ENGINE_INIT_FAILED`,
 > `TEMPLATE_*` 등)는 사내 표준 스킴과 요청 단위(req_init / req_load_config / req_reset)
