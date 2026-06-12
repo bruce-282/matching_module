@@ -95,7 +95,7 @@ safe_zones:
 | `res.success` | `False` |
 | `res.error_code` | `ErrorCode.SAFE_ZONE_VIOLATION` (사내 표준 `ErrorCode`, num=504) |
 | `res.error_message` | `point {L\|R} [x, y, z] is outside its safe zone` |
-| `res.code` | 숫자 코드 `MMMSEEE` (예: `20504`) — crp_core 응답/로깅용 |
+| `res.code` | 숫자 코드 `MMMSEEE` (예: `30504` — MMM=000, S=3, EEE=504) — crp_core 응답/로깅용 |
 | `res.details` | `{"point": "L"\|"R", "position": [x, y, z]}` (벗어난 포인트와 좌표) |
 
 > 사내 표준 예외가 필요하면 `res.to_error()` 로 `MatchingError` 를 얻을 수 있습니다.
@@ -112,7 +112,7 @@ safe_zones:
 `run_matcher.py` 처럼 호출 측은 `success` 로 분기하여 아래 한 줄을 ERROR 로 기록합니다.
 
 ```
-ERROR  ❌ Matching failed - {base_name} [20504] SAFE_ZONE_VIOLATION: point L [150.61, 52.31, 1536.67] is outside its safe zone
+ERROR  ❌ Matching failed - {base_name} [30504] SAFE_ZONE_VIOLATION: point L [150.61, 52.31, 1536.67] is outside its safe zone
 ```
 
 ### 호출 측에서 처리 예시

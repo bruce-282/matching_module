@@ -30,8 +30,8 @@ import numpy as np
 from .error_handler import ErrorCode, MatchingError
 
 # 실패 결과의 기본 severity. code_str(MMMSEEE) 의 S 자리에 들어간다.
-# TODO: reconstruction_module 의 severity 규약에 맞춰 확정/세분화.
-DEFAULT_SEVERITY = "2"
+# raise 시점 기본은 severity=3 (사내 규약) → 코드는 MMM3EEE 형태 (예: 30502).
+DEFAULT_SEVERITY = "3"
 
 
 @dataclass
