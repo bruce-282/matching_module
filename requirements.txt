@@ -1,4 +1,3 @@
-
 torch
 torchvision
 torchaudio
@@ -24,5 +23,7 @@ open3d
 # Utilities
 matplotlib<3.9
 seaborn
+tifffile
 
 huggingface_hub
+imagecodecs

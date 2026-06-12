@@ -181,7 +181,7 @@ def setup_dual_logger(
 
 
 # 편의 함수들
-def get_logger(name: str = __name__, level: int = logging.INFO) -> logging.Logger:
+def get_logger(name: str = __name__, level: int = logging.DEBUG) -> logging.Logger:
     """기본 로거를 반환합니다."""
     return setup_logger(name, level)
 

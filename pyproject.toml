@@ -2,6 +2,9 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+py-modules = []
+
 [project]
 name = "matching-module"
 version = "0.1.0"
@@ -26,6 +29,11 @@ classifiers = [
 ]
 dynamic = ["dependencies"]
 
+[project.optional-dependencies]
+teaserpp = [
+    "teaserpp-python @ file:///home/jtkim/sources/matching_module/third_party/TEASER-plusplus",
+]
+
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 
@@ -41,8 +49,8 @@ roma-match = "core.matchers.roma:main"
 
 # PyTorch CUDA 설치를 위한 post-install 스크립트
 [tool.setuptools.cmdclass]
-develop = "setuptools.command.develop:develop"
-install = "setuptools.command.install:install"
+develop = "setuptools.command.develop.develop"
+install = "setuptools.command.install.install"
 
 
 [tool.coverage.run]

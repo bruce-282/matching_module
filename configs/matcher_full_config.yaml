@@ -1,0 +1,53 @@
+# 와이드 이미지 매칭 설정 파일
+# 와이드 이미지용 특화 설정
+
+# 이미지 경로 설정
+source_image_path: "datasets/3_IMG_DepthMap_undistorted.png"
+input_dir: "datasets/0911/"
+output_dir: "output0911"
+
+# 매칭 파라미터 (와이드 이미지용 조정)
+max_keypoints: 2500  # 와이드 이미지이므로 더 많은 키포인트
+
+geometry_type: "Homography"
+ransac_method: "CV2_USAC_MAGSAC"
+ransac_reproj_threshold: 12.0  # 와이드 이미지용 낮은 임계값
+ransac_max_iter: 300000
+ransac_confidence: 0.9999
+debug_mode: true
+
+# 포인트 위치 설정 (와이드 이미지용 조정)
+pointL_pos:
+  x_ratio: 0.35
+  y_ratio: 0.58
+
+pointR_pos:
+  x_ratio: 0.63
+  y_ratio: 0.58
+
+pointU_pos:
+  x_ratio: 0.476
+  y_ratio: 0.45
+
+# 기타 설정
+point_radius: 25
+depth_max: 2300.0
+
+camera_intrinsics:
+  fx: 2344.06988494
+  fy: 2344.40009342502
+  cx: 989.06314625513
+  cy: 807.02989528271
+camera_distortions:
+  k1: -0.24331290305526787
+  k2: 0.13922919417642093
+  p1: 0.0005252878633098153
+  p2: -0.0010237886757940777
+  k3: -0.01443719970450923
+
+image_size:
+  width: 2064
+  height: 1544
+
+
+image_undistortion: true

@@ -1,0 +1,50 @@
+input_dir: "datasets/new_angle/"
+output_dir: "new_angle"
+
+max_keypoints: 7000  
+
+geometry_type: "Homography"
+ransac_method: "CV2_USAC_MAGSAC"
+ransac_reproj_threshold: 13.0  
+ransac_max_iter: 80000
+ransac_confidence: 0.9999
+debug_mode: true
+
+save_essential: "all"  # all, 2d, 3d, none
+
+depth_max: 2500.0
+
+enable_3d_matching: true
+
+stable_depth_range: 50.0 # +-50.0mm
+
+pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
+
+result_image_contrast: 5.0
+# 3D RANSAC 파라미터
+ransac_3d:
+  max_correspondence_distance: 0.2
+  ransac_n: 7                         
+  max_iterations: 3000                
+  confidence: 0.9999
+
+point_radius: 55
+
+camera_intrinsics:
+  fx: 2344.06988494
+  fy: 2344.40009342502
+  cx: 989.06314625513
+  cy: 807.02989528271
+camera_distortions:
+  k1: -0.24331290305526787
+  k2: 0.13922919417642093
+  p1: 0.0005252878633098153
+  p2: -0.0010237886757940777
+  k3: -0.01443719970450923
+
+image_size:
+  width: 2064
+  height: 1544
+
+
+image_undistortion: true

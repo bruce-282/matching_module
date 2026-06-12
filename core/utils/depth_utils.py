@@ -3,46 +3,36 @@
 Depth map 관련 유틸리티 함수들
 """
 import numpy as np
-from core.utils.logger_utils import get_logger
+from .logger_utils import get_logger
 from typing import Optional, Tuple, List
+from .camera_utils import Camera
 
 logger = get_logger(__name__)
 
-DEFAULT_DEPTH_MAP_WIDTH = 2064
-DEFAULT_DEPTH_MAP_HEIGHT = 1544
 
 
 def point_cloud_to_depth_map(
-    points: np.ndarray, colors: Optional[np.ndarray] = None
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    points: np.ndarray, camera: Camera
+) -> Tuple[Optional[np.ndarray]]:
     """
     Convert point cloud to depth map
 
     Args:
         points: 3D point array (N, 3)
-        colors: Color array (N, 3) - optional
-
+        camera: Camera object
     Returns:
         depth_map: depth map 이미지 (H, W)
-        intrinsic: 카메라 내부 파라미터 (3, 3)
     """
     try:
-        # 포인트 클라우드의 경계 계산
-        min_coords = np.min(points, axis=0)
-        max_coords = np.max(points, axis=0)
-
-        # 이미지 크기 설정 (기본값)
-        img_width, img_height = DEFAULT_DEPTH_MAP_WIDTH, DEFAULT_DEPTH_MAP_HEIGHT
 
         # 카메라 내부 파라미터 (기본값)
-        fx = img_width
-        fy = img_height
-        cx, cy = img_width / 2, img_height / 2  # principal point
-        intrinsic = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+        fx = camera.get_intrinsic_matrix()[0, 0]
+        fy = camera.get_intrinsic_matrix()[1, 1]
+        cx, cy = camera.get_intrinsic_matrix()[0, 2], camera.get_intrinsic_matrix()[1, 2]
 
         # Depth map 초기화
-        depth_map = np.zeros((img_height, img_width), dtype=np.float32)
-        depth_count = np.zeros((img_height, img_width), dtype=np.int32)
+        depth_map = np.zeros((camera.image_size[1], camera.image_size[0]), dtype=np.float32)
+        depth_count = np.zeros((camera.image_size[1], camera.image_size[0]), dtype=np.int32)
 
         # 각 포인트를 이미지 평면에 투영
         for i, point in enumerate(points):
@@ -56,7 +46,7 @@ def point_cloud_to_depth_map(
             v = int((y * fy / z) + cy)
 
             # 이미지 경계 확인
-            if 0 <= u < img_width and 0 <= v < img_height:
+            if 0 <= u < camera.image_size[0] and 0 <= v < camera.image_size[1]:
                 # 가장 가까운 depth 값 저장 (최소값 사용)
                 if depth_count[v, u] == 0 or z < depth_map[v, u]:
                     depth_map[v, u] = z
@@ -67,14 +57,14 @@ def point_cloud_to_depth_map(
 
         if np.sum(valid_mask) == 0:
             logger.warning("Valid depth map cannot be created.")
-            return None, None
+            return None
 
         logger.info(f"Depth map created: {np.sum(valid_mask)} valid pixels")
-        return depth_map, intrinsic
+        return depth_map
 
     except Exception as e:
         logger.error(f"Depth map creation error: {e}")
-        return None, None
+        return None
 
 
 def find_depth_from_2d_robust(

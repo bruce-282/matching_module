@@ -7,7 +7,7 @@ import yaml
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
-from core.utils.logger_utils import get_logger
+from .logger_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -193,10 +193,10 @@ def create_camera_from_yaml_config(config: Dict[str, Any]):
 
         # 이미지 크기 추출
         if "image_size" not in config:
-            raise ValueError("'image_size' key not found in the configuration.")
+            image_size = (2064, 1544)
+        else:
+            image_size = (config["image_size"]["width"], config["image_size"]["height"])
         
-        image_size = (config["image_size"]["width"], config["image_size"]["height"])
-
         # Camera 객체 생성
         camera = Camera(intrinsic_matrix, distortion_coeffs, image_size)
         return camera
@@ -211,16 +211,130 @@ def create_camera_from_yaml_config(config: Dict[str, Any]):
         raise e
 
 
+def load_photoneo_camera_config(config_path: str) -> Dict[str, Any]:
+    """
+    Photoneo 카메라 설정 JSON 파일을 로드하고 create_camera_from_yaml_config 형식으로 변환합니다.
+
+    Args:
+        config_path: Photoneo 카메라 설정 JSON 파일 경로
+
+    Returns:
+        create_camera_from_yaml_config가 기대하는 형식의 딕셔너리:
+        {
+            "camera_intrinsics": {"fx": float, "fy": float, "cx": float, "cy": float},
+            "camera_distortions": {"k1": float, "k2": float, "p1": float, "p2": float, "k3": float},
+            "image_size": {"width": int, "height": int}
+        }
+
+    Raises:
+        FileNotFoundError: 파일을 찾을 수 없을 때
+        KeyError: 필수 키가 없을 때
+        ValueError: 파라미터 형식이 잘못되었을 때
+    """
+    config_path = Path(config_path)
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"Photoneo camera configuration file not found: {config_path}")
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        # sensores.scanner 섹션 추출
+        if "sensores" not in config:
+            raise KeyError("'sensores' key not found in the Photoneo configuration file.")
+        
+        sensors = config["sensores"]
+        if "scanner" not in sensors:
+            raise KeyError("'scanner' section not found in the Photoneo configuration file.")
+        
+        scanner = sensors["scanner"]
+
+        # intrinsic_matrix 추출 (9개 요소: [fx, 0, cx, 0, fy, cy, 0, 0, 1])
+        if "intrinsic_matrix" not in scanner:
+            raise KeyError("'intrinsic_matrix' not found in the scanner section.")
+        
+        intrinsic_list = scanner["intrinsic_matrix"]
+        if len(intrinsic_list) != 9:
+            raise ValueError(
+                f"Intrinsic matrix must have 9 elements. Current: {len(intrinsic_list)}"
+            )
+        
+        # intrinsic_matrix는 row-major 형식: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
+        fx = float(intrinsic_list[0])
+        fy = float(intrinsic_list[4])
+        cx = float(intrinsic_list[2])
+        cy = float(intrinsic_list[5])
+
+        # distortion_coefficients 추출
+        if "distortion_coefficients" not in scanner:
+            raise KeyError("'distortion_coefficients' not found in the scanner section.")
+        
+        dist_list = scanner["distortion_coefficients"]
+        if len(dist_list) < 5:
+            raise ValueError(
+                f"Distortion coefficients must have at least 5 elements. Current: {len(dist_list)}"
+            )
+        
+        k1 = float(dist_list[0])
+        k2 = float(dist_list[1])
+        p1 = float(dist_list[2])
+        p2 = float(dist_list[3])
+        k3 = float(dist_list[4])
+
+        # resolution 추출
+        if "resolution" not in scanner:
+            raise KeyError("'resolution' not found in the scanner section.")
+        
+        resolution = scanner["resolution"]
+        if "width" not in resolution or "height" not in resolution:
+            raise KeyError("'width' or 'height' not found in the resolution section.")
+        
+        width = int(resolution["width"])
+        height = int(resolution["height"])
+
+        # create_camera_from_yaml_config 형식으로 변환
+        result = {
+            "camera_intrinsics": {
+                "fx": fx,
+                "fy": fy,
+                "cx": cx,
+                "cy": cy,
+            },
+            "camera_distortions": {
+                "k1": k1,
+                "k2": k2,
+                "p1": p1,
+                "p2": p2,
+                "k3": k3,
+            },
+            "image_size": {
+                "width": width,
+                "height": height,
+            },
+        }
+
+        logger.info(f"Photoneo camera configuration loaded: {config_path}")
+        logger.debug(f"  Intrinsics: fx={fx}, fy={fy}, cx={cx}, cy={cy}")
+        logger.debug(f"  Distortions: k1={k1}, k2={k2}, p1={p1}, p2={p2}, k3={k3}")
+        logger.debug(f"  Image size: {width}x{height}")
+
+        return result
+
+    except json.JSONDecodeError as e:
+        raise ValueError(f"JSON parsing error: {e}")
+    except (KeyError, ValueError) as e:
+        raise e
+    except Exception as e:
+        raise Exception(f"Photoneo camera configuration load error: {e}")
+
+
 def save_points_to_yaml(
-    image_path: Path,
     image_size: Tuple[int, int],
-    point1_2d: Optional[np.ndarray],
-    point2_2d: Optional[np.ndarray],
-    point3_2d: Optional[np.ndarray],
-    point1_3d: Optional[np.ndarray] = None,
-    point2_3d: Optional[np.ndarray] = None,
-    point3_3d: Optional[np.ndarray] = None,
+    result_3d_points: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]] = None,
     plane_normal: Optional[np.ndarray] = None,
+    normal_angles: Optional[Tuple[float, float]] = None,
+    image_name: Optional[str] = None,
     output_path: Optional[Path] = None,
 ) -> None:
     """
@@ -229,40 +343,28 @@ def save_points_to_yaml(
     Args:
         image_path: 소스 이미지 경로
         image_size: 이미지 크기 (height, width)
-        point1_2d: Point L의 2D 좌표
-        point2_2d: Point R의 2D 좌표
-        point3_2d: Point U의 2D 좌표
         point1_3d: Point L의 3D 좌표 (선택사항)
         point2_3d: Point R의 3D 좌표 (선택사항)
         point3_3d: Point U의 3D 좌표 (선택사항)
         plane_normal: 평면 법선 벡터 (선택사항)
         output_path: 출력 디렉토리 경로 (선택사항)
     """
-    # source 이미지 이름으로 yaml 파일 생성
-    yaml_filename = f"{image_path.stem}_result.yaml"
 
-    if output_path is not None:
-        yaml_path = output_path / yaml_filename
-    else:
-        yaml_path = image_path.parent / yaml_filename
+
 
     # YAML 데이터 구조
     points_data = {
-        "source_image": image_path.name,
+        "source_image": image_name,
         "image_size": {
             "width": int(image_size[1]),
             "height": int(image_size[0]),
         },
-        "transformed_points_2d": {
-            "pointL": {"x": int(point1_2d[0]), "y": int(point1_2d[1])},
-            "pointR": {"x": int(point2_2d[0]), "y": int(point2_2d[1])},
-            "pointU": {"x": int(point3_2d[0]), "y": int(point3_2d[1])},
-        },
     }
 
+    point1_3d, point2_3d, point3_3d = result_3d_points
     # 3D 정보가 있는 경우 추가
-    if point1_3d is not None and point2_3d is not None:
-        points_data["transformed_points_3d"] = {
+
+    points_data["transformed_points_3d"] = {
             "pointL": {
                 "x": float(point1_3d[0] if point1_3d is not None else 0),
                 "y": float(point1_3d[1] if point1_3d is not None else 0),
@@ -283,7 +385,16 @@ def save_points_to_yaml(
                 "y": float(plane_normal[1] if plane_normal is not None else 0),
                 "z": float(plane_normal[2] if plane_normal is not None else 0),
             },
-        }
+            "normal_angles": {
+                "horizontal": float(normal_angles[0] if normal_angles is not None else 0),
+                "vertical": float(normal_angles[1] if normal_angles is not None else 0),
+            },
+            "point_unit": "mm",
+            "normal_unit": "deg",
+    }
+
+    # source 이미지 이름으로 yaml 파일 생성
+    yaml_path = output_path / f"{image_name}_result.yaml"
 
     with open(yaml_path, "w", encoding="utf-8") as f:
         yaml.dump(

@@ -3,15 +3,14 @@
 """
 
 from pathlib import Path
-from re import escape
 import torch
 from PIL import Image
 import numpy as np
 import cv2
-import os
 import logging
 
-from core.utils.logger_utils import get_logger
+from .logger_utils import get_logger
+
 logger = get_logger(__name__)
 
 logging.getLogger("PIL").setLevel(logging.WARNING)
@@ -37,7 +36,7 @@ def process_depth_map(
 
     # Depth max 값보다 큰 값은 texture 값으로 대체
     if texture_image is not None:
-        
+
         processed = texture_image.copy()
         mask = (depth_image > depth_max) | (depth_image == 0.0)
         processed[mask] = 0
@@ -62,6 +61,9 @@ def process_depth_map(
 def read_image(
     path,
     grayscale=False,
+    width=None,
+    height=None,
+    intrinsic_matrix=None,
 ):
     """이미지 또는 PLY 파일을 읽어서 numpy 배열로 반환합니다."""
     path = Path(path)
@@ -70,19 +72,31 @@ def read_image(
     if path.suffix.lower() == ".ply":
         from .pcd_utils import load_ply_as_image
 
-        return load_ply_as_image(path)
+        return load_ply_as_image(
+            path, width=width, height=height, intrinsic_matrix=intrinsic_matrix
+        )
 
     try:
         # TIFF 파일 처리 (32비트 depth map 지원)
         if path.suffix.lower() in [".tif", ".tiff"]:
-            pil_image = Image.open(str(path))
-            image = np.array(pil_image)
+            # tifffile을 사용하여 원본 데이터 타입과 값 보존
+            import tifffile
+
+            image = tifffile.imread(str(path))
+
+            # float32로 변환하여 원본 값 보존
+            image = image.astype(np.float32)
 
             # 단일 채널인 경우 3채널로 확장
             if len(image.shape) == 2:
                 image = np.stack([image] * 3, axis=-1)
             elif len(image.shape) == 3 and image.shape[2] == 1:
                 image = np.concatenate([image] * 3, axis=-1)
+
+            # logger.debug(
+            #     f"TIFF - tifffile.imread: shape={image.shape}, dtype={image.dtype}"
+            # )
+            # logger.debug(f"TIFF - min={np.min(image)}, max={np.max(image)}")
 
         # 일반 이미지 파일 처리
         else:
@@ -116,21 +130,6 @@ def load_image(image_path):
     return image_tensor
 
 
-# def resize_image(image, target_size):
-#     """이미지를 지정된 크기로 리사이즈합니다."""
-#     if isinstance(image, torch.Tensor):
-#         # PyTorch 텐서인 경우 PIL로 변환 후 리사이즈
-#         image_np = image.permute(1, 2, 0).numpy()
-#         image_pil = Image.fromarray((image_np * 255).astype(np.uint8))
-#         resized_pil = image_pil.resize(target_size, Image.Resampling.LANCZOS)
-#         resized_np = np.array(resized_pil)
-#         return torch.from_numpy(resized_np).permute(2, 0, 1).float() / 255.0
-#     else:
-#         # PIL 이미지인 경우
-#         resized = image.resize(target_size, Image.Resampling.LANCZOS)
-#         return resized
-
-
 def resize_image(image, size, interp="cv2_area"):
     if interp.startswith("cv2_"):
         interp = getattr(cv2, "INTER_" + interp[len("cv2_") :].upper())
@@ -155,3 +154,33 @@ def normalize_image(image):
     else:
         image_np = np.array(image)
         return (image_np - image_np.mean()) / image_np.std()
+
+
+def apply_roi_mask(image: np.ndarray, roi: list, inplace: bool = False) -> np.ndarray:
+    """
+    ROI 영역 외의 부분을 0으로 설정합니다.
+    이미지 크기는 유지하고 ROI 영역만 유효하게 만듭니다.
+
+    Args:
+        image: 입력 이미지 (H, W) 또는 (H, W, C)
+        roi: ROI 영역 [x1, y1, x2, y2] 형식
+        inplace: True이면 원본 이미지를 수정, False이면 복사본 반환
+
+    Returns:
+        ROI 영역 외의 부분이 0으로 설정된 이미지
+    """
+    if roi is None or len(roi) != 4:
+        return image
+
+    x1, y1, x2, y2 = roi[0], roi[1], roi[2], roi[3]
+
+    if not inplace:
+        image = image.copy()
+
+    # ROI 영역 외의 부분을 0으로 설정
+    image[:y1, :] = 0  # 위쪽 영역
+    image[y2:, :] = 0  # 아래쪽 영역
+    image[:, :x1] = 0  # 왼쪽 영역
+    image[:, x2:] = 0  # 오른쪽 영역
+
+    return image
