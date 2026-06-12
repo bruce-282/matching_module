@@ -148,7 +148,7 @@ use(res.point_l, res.point_r, res.point_u, res.plane_normal)
 ```
 
 > 에러 코드는 `core/matchers/error_handler.py` 의 `ErrorCode` (사내 표준) 에
-> 정의됩니다. reconstruction_module 의 범주 패턴(0/100/200/300/400/500)을 따릅니다.
+> 정의됩니다. 전체 코드 표·`MMMSEEE` 인코딩은 [Error Codes](error_codes.md) 참고.
 
 ## 구현 위치
 

@@ -294,3 +294,4 @@ transformed_points:
 ## 추가 문서
 
 - [Safe Zone Check Process](docs/safe_zone_check.md): 매칭 결과 anchor가 유효 영역을 벗어날 때 매칭 실패로 처리하는 안전장치 설명
+- [Error Codes](docs/error_codes.md): 사내 표준 `ErrorCode` 전체 표, `MMMSEEE` 인코딩, `run_pipeline` 반환 코드 및 `MatchResult`/`MatchingError` 설명
