@@ -34,8 +34,8 @@ pip install -r requirements.txt
 
 ```bash
 python run_matcher.py \
-  --config_path configs/DefualtModel/matcher.config.yaml \
-  --template_param_path configs/DefualtModel/matcher.teaching.param.yaml
+  --config_path configs/Default/matcher.config.yaml \
+  --template_param_path configs/Default/matcher.teaching.param.yaml
 ```
 
 ### 설정 파일 구조
@@ -56,7 +56,7 @@ datasets/
     └── ...
 
 configs/
-└── DefualtModel/
+└── Default/
     ├── matcher.config.yaml        # 메인 설정 파일
     └── matcher.teaching.param.yaml # 템플릿 파라미터 파일
 ```
@@ -135,7 +135,23 @@ selected_points:
     x: 184.56082806030466
     y: 261.9381813145888
     z: 1486.9999885559082
+
+# (선택) Safe zone - anchor 결과가 유효 영역을 벗어나면 매칭 실패로 처리하는 안전장치
+# 각 포인트별 회전 큐보이드(OBB): min/max 두 꼭짓점 + 중심 기준 euler(Three.js 'XYZ', radian)
+safe_zones:
+  L:
+    min: [34.7676, 105.0314, 1552.3996]
+    max: [181.7779, -9.7333, 1502.2293]
+    euler: [2.7066, 0.5931, -0.1091]
+  R:
+    min: [514.7950, 295.5452, 1820.6679]
+    max: [661.8052, 180.7805, 1770.4976]
+    euler: [2.7066, 0.5931, -0.1091]
 ```
+
+> `safe_zones`는 선택 항목입니다. 설정하면 매칭으로 구한 `L`, `R` anchor가 해당 영역을
+> 벗어날 때 매칭을 실패 처리하여 로봇이 비정상 위치로 가는 것을 막습니다. 자세한 동작은
+> [Safe Zone Check Process](docs/safe_zone_check.md) 문서를 참고하세요.
 
 ## 입력 파일
 
