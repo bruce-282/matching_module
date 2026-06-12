@@ -145,21 +145,28 @@ safe zone 검사를 **로봇 프레임**에서 수행하기 위해, 카메라↔
 
 ### 목표 파이프라인 (로봇 프레임 검사)
 
-```mermaid
-flowchart TB
-    M["매칭 + 포즈 추정"] --> R["result_3d<br/>(현재 카메라 프레임)<br/>anchor L · R"]
-    T["safe_zones<br/>(템플릿 카메라 프레임)<br/>OBB: min/max + euler"]
-
-    R -->|"현재 camera_calibration<br/>4x4 (current cam → robot)<br/>모듈 초기화 시 수신"| RB["result_3d<br/>(로봇 프레임)"]
-    T -->|"템플릿 camera_calibration<br/>4x4 (teaching cam → robot)<br/>template_param 에서 파싱"| TB["safe_zone<br/>(로봇 프레임)"]
-
-    RB --> C{"로봇 프레임에서<br/>OBB 내부 판정"}
-    TB --> C
-    C -->|"안에 있음"| PASS["통과 → 정상 반환"]
-    C -->|"벗어남"| FAIL["매칭 실패<br/>Exception raise"]
-
-    classDef robot fill:#e8f0ff,stroke:#3b6ea5;
-    class RB,TB,C robot;
+```text
+ [INPUT A]  result_3d        현재 카메라 프레임, anchor L·R
+                │
+                │  x  현재 camera_calibration  (4x4 : current cam -> robot)
+                │       └ 모듈 초기화 시 수신
+                v
+            result_3d @ ROBOT  ─────────────────┐
+                                                │
+ [INPUT B]  safe_zones        템플릿 카메라 프레임, OBB(min/max + euler)
+                │                               │
+                │  x  템플릿 camera_calibration  (4x4 : teaching cam -> robot)
+                │       └ template_param 에서 파싱
+                v                               │
+            safe_zone @ ROBOT  ─────────────────┤
+                                                │
+                                                v
+                  ┌───────────────────────────────────────────┐
+                  │        로봇 프레임 (고정 · 절대 기준)           │
+                  │   result_3d @ROBOT  ∈?  safe_zone @ROBOT     │
+                  │                                             │
+                  │   안에 있음 → 통과    /    벗어남 → 매칭 실패     │
+                  └───────────────────────────────────────────┘
 ```
 
 > **로봇 프레임(고정·절대 기준)** 으로 양쪽을 모은 뒤 OBB 내부를 판정하므로, 카메라가
