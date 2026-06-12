@@ -67,21 +67,44 @@ safe_zones:
     euler: [2.7066, 0.5931, -0.1091]
 ```
 
-## 결과
+## 결과 (정확한 반환/동작)
 
 검사는 파이프라인에서 3D anchor 결과가 확정된 직후 수행됩니다.
 
-| 상황 | 동작 |
+| 상황 | `Matcher.run_pipeline` 의 동작 |
 |------|------|
-| 모든 검사 포인트가 zone **안** | 통과 → 파이프라인 계속 진행, `Safe zone check passed for point L/R.` (DEBUG) |
-| 어느 한 포인트라도 zone **밖** | `Exception` 발생 → depth 계산 실패와 동일하게 **매칭 실패 처리** |
-| `safe_zones` 미설정 / transform 없음 | 검사 skip (DEBUG 로그) |
+| 모든 검사 포인트가 zone **안** | 정상 반환: `(result1_3d, result2_3d, result3_3d, plane_normal)` 튜플. `Safe zone check passed for point L/R.` (DEBUG) |
+| 어느 한 포인트라도 zone **밖** | **튜플을 반환하지 않고 `Exception` 을 raise** (아래 참고). 호출 측에서 try/except 로 처리해야 함 |
+| `safe_zones` 미설정 | 검사 skip, 정상 반환 (DEBUG 로그) |
 
-zone을 벗어나면 `run_matcher.py`에서 다음과 같이 실패로 기록됩니다.
+### zone 을 벗어났을 때 (실패)
+
+`check_safe_zones` 가 `Exception` 을 raise 하고, 이 예외가 `run_pipeline` 밖으로
+그대로 전파됩니다. **`run_pipeline` 은 이 경우 `(None, None, None, None)` 같은 값을
+반환하지 않습니다 — 예외를 던집니다.** 예외 메시지는 다음 형식입니다.
 
 ```
-ERROR  {base_name} - Safe zone check failed: point L [x y z] is outside its safe zone
-ERROR  ❌ Matching failed - {base_name}
+Safe zone check failed: point {L|R} [{x} {y} {z}] is outside its safe zone
+```
+
+`run_matcher.py` 처럼 호출 측이 예외를 잡으면, 해당 입력을 건너뛰며(`continue`)
+아래 한 줄만 ERROR 로 기록됩니다. (성공/실패 분기를 건너뛰므로
+`❌ Matching failed` 줄은 출력되지 않습니다.)
+
+```
+ERROR  {base_name} - Safe zone check failed: point L [150.61 52.31 1536.67] is outside its safe zone
+```
+
+### 호출 측에서 처리 예시
+
+```python
+try:
+    result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(...)
+    # 여기 도달하면 safe zone 통과 (anchor 결과 유효)
+except Exception as e:
+    # str(e) == "Safe zone check failed: point ... is outside its safe zone"
+    # 매칭 실패로 처리 (로봇 이동 금지 등)
+    ...
 ```
 
 ## 구현 위치
