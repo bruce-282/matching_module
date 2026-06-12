@@ -115,11 +115,27 @@ depth_max: 2500.0                  # Depth map 최대 값
 
 ### 템플릿 파라미터 파일 (matcher.teaching.param.yaml)
 
-매칭에 사용되는 소스 이미지와 3D 포인트 좌표를 정의합니다:
+매칭에 사용되는 소스 이미지, 템플릿(소스) 카메라 파라미터, 3D 포인트 좌표를 정의합니다:
 
 ```yaml
 # 소스 이미지 경로 (매칭에 사용될 템플릿 이미지)
 path_match_source: "datasets/source_0919.tif"
+
+# 템플릿(소스) 카메라 파라미터 - 소스 카메라(camera_source) 생성에 사용
+camera_intrinsics:
+  fx: 2320.1113393328706
+  fy: 2320.3249669909296
+  cx: 1020.9667575368462
+  cy: 721.5296868755295
+camera_distortions:
+  k1: -0.23691571827746347
+  k2: 0.18485668869694924
+  p1: 0.0006974096202867402
+  p2: -0.0008940189418357964
+  k3: -0.11234667492280082
+image_size:
+  width: 2064
+  height: 1544
 
 # 매칭 포인트의 3D 좌표 (L, R, U 세 점)
 selected_points:
@@ -149,9 +165,16 @@ safe_zones:
     euler: [2.7066, 0.5931, -0.1091]
 ```
 
-> `safe_zones`는 선택 항목입니다. 설정하면 매칭으로 구한 `L`, `R` anchor가 해당 영역을
-> 벗어날 때 매칭을 실패 처리하여 로봇이 비정상 위치로 가는 것을 막습니다. 자세한 동작은
-> [Safe Zone Check Process](docs/safe_zone_check.md) 문서를 참고하세요.
+템플릿 파라미터 파일 항목 설명:
+
+- `path_match_source`: 매칭 템플릿(소스) 이미지 경로
+- `camera_intrinsics` / `camera_distortions` / `image_size`: 템플릿(소스) 카메라 파라미터. 소스 카메라(`camera_source`) 객체 생성에 사용됩니다.
+- `selected_points` (L, R, U): 매칭 대상 anchor 포인트의 3D 좌표
+- `safe_zones` (선택): `L`, `R` anchor가 유효 영역을 벗어날 때 매칭을 실패 처리하는 안전장치. 자세한 동작은 [Safe Zone Check Process](docs/safe_zone_check.md) 참고.
+
+> 참고: `path_match_source`, `selected_points`, `safe_zones`는 최상위 또는 `matching_model:`
+> 하위 어디에 있어도 인식됩니다. 프로덕션 파일에 포함될 수 있는 `url`, `updated_at` 등의
+> 메타데이터 필드는 매처가 사용하지 않습니다.
 
 ## 입력 파일
 
