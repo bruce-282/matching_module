@@ -6,7 +6,8 @@ import cv2
 import numpy as np
 from pathlib import Path
 import yaml
-from core.utils.logger_utils import get_logger
+import open3d as o3d
+from .logger_utils import get_logger
 from typing import Dict, List, Optional, Tuple, Any
 
 logger = get_logger(__name__)
@@ -269,3 +270,120 @@ def compute_geometry(
 
     else:
         return {}
+
+
+def solve_rigid_transform_between_points(points1: np.ndarray, points2: np.ndarray) -> np.ndarray:
+    """
+    SVD 기반 3D point correspondence로 rigid transformation 계산
+    
+    Args:
+        points1: 첫 번째 point cloud (Nx3)
+        points2: 두 번째 point cloud (Nx3)
+    
+    Returns:
+        4x4 transformation matrix
+    """
+    assert points1.shape[1] == 3 and points1.shape[0] >= 3, "points1 must be Nx3 with at least 3 points"
+    assert points2.shape[1] == 3 and points2.shape[0] >= 3, "points2 must be Nx3 with at least 3 points"
+    assert points1.shape[0] == points2.shape[0], "points1 and points2 must have same number of points"
+    
+    # 4x4 identity matrix 초기화
+    pose = np.eye(4, dtype=np.float32)
+    
+    try:
+        # Centroid 계산
+        mean1 = np.mean(points1, axis=0)
+        mean2 = np.mean(points2, axis=0)
+        
+        # Centered points
+        P = points1 - mean1
+        Q = points2 - mean2
+        
+        # Cross-covariance matrix
+        S = P.T @ Q
+        assert S.shape == (3, 3), "Cross-covariance matrix must be 3x3"
+        
+        # SVD decomposition
+        U, _, Vt = np.linalg.svd(S)
+        R = Vt.T @ U.T
+        
+        # Rotation matrix 검증
+        if not np.allclose(R.T @ R, np.eye(3), atol=1e-6):
+            logger.warning("Invalid rotation matrix detected, returning identity")
+            return pose
+        
+        # Reflection 방지
+        if np.linalg.det(R) < 0:
+            Vt[-1, :] *= -1
+            R = Vt.T @ U.T
+        
+        # Translation 계산
+        t = mean2 - R @ mean1
+        
+        # 4x4 transformation matrix 구성
+        pose[:3, :3] = R
+        pose[:3, 3] = t
+        
+        # Finite 값 검증
+        if not np.all(np.isfinite(pose)):
+            logger.warning("Non-finite values in transformation matrix, returning identity")
+            return np.eye(4, dtype=np.float32)
+        
+        logger.info(f"SVD-based rigid transform computed successfully")
+        logger.debug(f"Rotation matrix:\n{R}")
+        logger.debug(f"Translation: {t}")
+        
+        return pose
+        
+    except Exception as e:
+        logger.error(f"Error in solve_rigid_transform_between_points: {e}")
+        return np.eye(4, dtype=np.float32)
+
+
+def registration_ransac_based_on_correspondence(pcd_source: o3d.geometry.PointCloud, 
+                                               pcd_target: o3d.geometry.PointCloud,
+                                               correspondences: List[List[int]],
+                                               max_correspondence_distance: float = 0.1, # 0.01m
+                                               ransac_n: int = 3,
+                                               max_iterations: int = 5000,
+                                               confidence: float = 0.95) -> np.ndarray or None:
+    """
+    Known correspondences를 사용한 RANSAC registration
+    
+    Args:
+        pcd_source: Source point cloud
+        pcd_target: Target point cloud
+        correspondences: Correspondence list [[i, i], [j, j], ...]
+        max_correspondence_distance: Maximum correspondence distance
+        ransac_n: Number of points for RANSAC
+        max_iterations: Maximum RANSAC iterations
+        confidence: RANSAC confidence
+    
+    Returns:
+        Transformation matrix
+    """
+    try:
+        # Correspondence vector 생성
+        corres_vector = o3d.utility.Vector2iVector(correspondences)
+        
+        # RANSAC registration 실행
+        result = o3d.pipelines.registration.registration_ransac_based_on_correspondence(
+            source=pcd_source, 
+            target=pcd_target,
+            corres=corres_vector,
+            max_correspondence_distance=max_correspondence_distance,
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(with_scaling=False),
+            ransac_n=ransac_n,
+            criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(max_iterations, confidence)
+        )
+        
+        logger.info(f"[3D RANSAC] registration completed - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
+        logger.debug(f"[3D RANSAC] converged: {result.fitness > 0.1}")
+        logger.debug(f"[3D RANSAC] Inlier correspondences: {len(result.correspondence_set)} pairs")
+        logger.debug(f"[3D RANSAC] transformation : {result.transformation}")
+        return result.transformation
+        
+    except Exception as e:
+        logger.error(f"Error in registration_ransac_based_on_correspondence: {e}")
+        # 실패 시 identity transformation 반환
+        return None

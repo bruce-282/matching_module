@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from typing import Tuple, Optional, Dict, List
 
-from core.utils.logger_utils import get_logger
+from .logger_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -24,6 +24,7 @@ def visualize_matches(
     line_thickness: int = 1,
     circle_color: Tuple[int, int, int] = (0, 255, 0),  # 녹색
     line_color: Tuple[int, int, int] = (255, 0, 0),  # 파란색
+    contrast: int = 0,
 ):
     """매칭 결과를 시각화합니다."""
     # 이미지 로드
@@ -60,7 +61,13 @@ def visualize_matches(
     # 이미지 연결
     combined_img = np.hstack([img0_rgb, img1_rgb])
 
-    # 키포인트 그리기 (스케일링 적용)
+    # 선을 그릴 오버레이 이미지 (알파 블렌딩용)
+    overlay = combined_img.copy()
+
+    # 연한 빨간색 (투명 효과를 위한 색상)
+    line_color_alpha = (255, 0, 0)
+    alpha = 0.15  # 투명도 (0.0 = 완전 투명, 1.0 = 불투명)
+
     match_count = 0
     for i, (kp0, kp1, conf) in enumerate(zip(keypoints0, keypoints1, confidence)):
         if conf > confidence_threshold:
@@ -73,11 +80,20 @@ def visualize_matches(
             x1, y1 = int(kp1[0] * scale1) + w0, int(kp1[1] * scale1)
             cv2.circle(combined_img, (x1, y1), circle_radius, circle_color, -1)
 
-            # 매칭 선 그리기
-            cv2.line(combined_img, (x0, y0), (x1, y1), line_color, line_thickness)
+            # 매칭 선 그리기 (오버레이에)
+            cv2.line(overlay, (x0, y0), (x1, y1), line_color_alpha, line_thickness)
+
+    # 오버레이 블렌딩
+    combined_img = cv2.addWeighted(overlay, alpha, combined_img, 1 - alpha, 0)
 
     # 결과 저장
+    # 밝기 조정 (더 밝게)
+    if contrast > 0:
+        combined_img = cv2.convertScaleAbs(combined_img, alpha=contrast)
+    else:
+        combined_img = combined_img
     combined_img_bgr = cv2.cvtColor(combined_img, cv2.COLOR_RGB2BGR)
+
     cv2.imwrite(output_path, combined_img_bgr)
     logger.info(f"Matching result is saved to {output_path}")
     logger.info(f"Total {match_count} matches are visualized.")
@@ -138,7 +154,7 @@ def warp_images(
     """
     h0, w0, _ = img0.shape
     h1, w1, _ = img1.shape
-    
+
     # Homography inverse transformation
     H_inv = np.linalg.inv(homography)
     warped_image = cv2.warpPerspective(img1, H_inv, (w0, h0))
