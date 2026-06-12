@@ -26,7 +26,8 @@ sys.path.insert(0, str(project_root))
 
 # 로거 설정
 from core.utils.logger_utils import setup_logger
-from .errors import MatcherError, MatcherErrorCode
+from .errors import MatcherError
+from .error_handler import ErrorCode
 from .results import MatchResult
 from .models.roma import Roma
 from ..utils.image_utils import resize_image, process_depth_map, apply_roi_mask
@@ -1063,7 +1064,7 @@ class Matcher:
             if not inside:
                 point = np.asarray(point_3d).tolist()
                 raise MatcherError(
-                    MatcherErrorCode.SAFE_ZONE_VIOLATION,
+                    ErrorCode.SAFE_ZONE_VIOLATION,
                     f"point {name} {point} is outside its safe zone",
                     details={"point": name, "position": point},
                 )
@@ -1094,9 +1095,10 @@ class Matcher:
         Returns:
             MatchResult. 예외를 던지지 않고 항상 결과 객체를 반환한다.
             - 성공: success=True, point_l/point_r/point_u/plane_normal 채워짐
-            - 실패: success=False, error_code(MatcherErrorCode)/error_message/details 채워짐
+            - 실패: success=False, error_code(ErrorCode)/error_message/details 채워짐
               (safe zone 위반 시 error_code=SAFE_ZONE_VIOLATION,
-               details={"point", "position"}; 그 외는 MATCHING_FAILED)
+               details={"point", "position"}; depth 실패는 DEPTH_CALCULATION_FAILED /
+               DEPTH_OUT_OF_RANGE; 그 외는 MATCH_FAILED)
         """
         # 경로 설정
         if target_texture_path is None or target_texture is None:
@@ -1284,13 +1286,13 @@ class Matcher:
                 # Depth 계산 결과 검증
                 if calculated_depths is None:
                     raise MatcherError(
-                        MatcherErrorCode.DEPTH_CALCULATION_FAILED,
+                        ErrorCode.DEPTH_CALCULATION_FAILED,
                         "Anchor depth calculation failed: None",
                     )
 
                 if any(d is None for d in calculated_depths):
                     raise MatcherError(
-                        MatcherErrorCode.DEPTH_CALCULATION_FAILED,
+                        ErrorCode.DEPTH_CALCULATION_FAILED,
                         f"Anchor depth calculation failed: "
                         f"L={calculated_depths[0]}, R={calculated_depths[1]}, U={calculated_depths[2]}",
                         details={
@@ -1331,7 +1333,7 @@ class Matcher:
 
                     if depth_diff > stable_range:
                         raise MatcherError(
-                            MatcherErrorCode.STABLE_DEPTH_RANGE_EXCEEDED,
+                            ErrorCode.DEPTH_OUT_OF_RANGE,
                             f"Out of stable depth range {anchor['name']}: "
                             f"{depth_diff:.1f}mm > {stable_range}mm",
                             details={
@@ -1462,11 +1464,12 @@ class Matcher:
             # 코드를 가진 도메인 실패(safe zone 위반, 깊이 계산 실패 등)를
             # 결과 객체로 변환해 반환한다. (예외를 외부로 던지지 않음)
             self.logger.error(str(e))
-            return MatchResult.fail(e.code, e.message, e.details)
+            return MatchResult.fail(e.error_code, e.message, e.details)
         except Exception as e:
-            # 예상치 못한 실패도 일반 코드(MATCHING_FAILED)로 묶어 결과 객체로 반환한다.
+            # 예상치 못한 실패(2D/3D 매칭·필터링 등)는 일반 코드(MATCH_FAILED)로
+            # 묶어 결과 객체로 반환한다.
             self.logger.error(f"Matching failed: {e}")
-            return MatchResult.fail(MatcherErrorCode.MATCHING_FAILED, str(e))
+            return MatchResult.fail(ErrorCode.MATCH_FAILED, str(e))
 
     def calculate_3d_points(
         self, result1_3d: np.ndarray, result2_3d: np.ndarray, result3_3d: np.ndarray, camera: Camera

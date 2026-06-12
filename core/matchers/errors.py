@@ -1,53 +1,36 @@
-"""Matcher 도메인 에러 코드 및 (내부) 예외.
+"""Matcher 내부 파이프라인 신호용 예외.
 
-외부(호출 측)에서 실패 유형을 **코드로 구분**할 수 있도록 ``MatcherErrorCode`` 를 둔다.
+``run_pipeline`` *내부*에서 실패를 사내 표준 ``ErrorCode`` (``error_handler``) 및
+부가정보(``details``)와 함께 전달하기 위한 **내부 전용** 예외다. ``run_pipeline``
+경계에서 잡혀 ``MatchResult`` 로 변환되며, 외부로 새지 않는다.
 
-공개 계약(권장): ``run_pipeline`` 은 예외를 던지지 않고 항상 ``MatchResult``
-(``core.matchers.results``) 를 반환한다. 호출 측은 try/except 없이 ``success`` 로
-분기하고, 실패 시 ``error_code`` 로 원인을 구분한다::
-
-    from core.matchers.results import MatchResult
-    from core.matchers.errors import MatcherErrorCode
-
-    res = matcher.run_pipeline(...)
-    if not res.success:
-        if res.error_code == MatcherErrorCode.SAFE_ZONE_VIOLATION:
-            # res.details == {"point": "L", "position": [x, y, z]}
-            ...  # 매칭 실패로 처리 (로봇 이동 금지 등)
-
-``MatcherError`` 는 파이프라인 **내부**에서 실패를 코드와 함께 전달하기 위한 예외이며,
-``run_pipeline`` 경계에서 잡혀 ``MatchResult`` 로 변환된다. (외부로 새지 않는다.)
+공개 계약은 ``MatchResult`` (``results``) 이고, 사내 표준 에러 코드/예외는
+``error_handler`` (``ErrorCode``, ``MatchingError``) 를 사용한다.
 """
 
-from enum import Enum
 from typing import Any, Dict, Optional
 
-
-class MatcherErrorCode(str, Enum):
-    """매처 실패 유형 코드. (str 기반이라 로그/JSON 직렬화에 그대로 사용 가능)"""
-
-    SAFE_ZONE_VIOLATION = "SAFE_ZONE_VIOLATION"  # anchor 가 safe zone 을 벗어남
-    DEPTH_CALCULATION_FAILED = "DEPTH_CALCULATION_FAILED"  # anchor depth 계산 결과 없음(None)
-    STABLE_DEPTH_RANGE_EXCEEDED = "STABLE_DEPTH_RANGE_EXCEEDED"  # depth 가 안정 범위를 벗어남
-    MATCHING_FAILED = "MATCHING_FAILED"  # 그 외 매칭 실패 (일반 실패)
+from .error_handler import ErrorCode
 
 
 class MatcherError(Exception):
-    """코드를 가진 매처 도메인 예외.
+    """파이프라인 내부 실패 신호 (ErrorCode + details 보유).
 
     Attributes:
-        code: 실패 유형 코드 (``MatcherErrorCode``)
-        message: 사람이 읽는 설명
-        details: 추가 정보 (예: 어떤 포인트, 좌표 등). 외부 처리/로깅에 사용.
+        error_code: 사내 표준 실패 코드 (``ErrorCode``)
+        message: 사람이 읽는 설명 (없으면 ``error_code`` 기본 메시지)
+        details: 추가 정보 (예: safe zone 위반 시 {"point", "position"}).
+            외부 처리/로깅에 사용. (사내 ``MatchingError`` 에는 details 가 없으므로
+            ``MatchResult.details`` 로만 전달된다.)
     """
 
     def __init__(
         self,
-        code: "MatcherErrorCode",
-        message: str,
+        error_code: ErrorCode,
+        message: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
     ):
-        self.code = code
-        self.message = message
+        self.error_code = error_code
+        self.message = message or error_code.default_message
         self.details = details or {}
-        super().__init__(f"[{code.value}] {message}")
+        super().__init__(f"[{error_code.name}] {self.message}")

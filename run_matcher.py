@@ -186,7 +186,7 @@ def main():
         else:
             logger.error(
                 f"❌ Matching failed - {base_name} "
-                f"[{result.error_code.value}] {result.error_message}"
+                f"[{result.code}] {result.error_code.name}: {result.error_message}"
             )
 
     # 메모리 정리

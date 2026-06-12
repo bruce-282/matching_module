@@ -84,55 +84,58 @@ safe_zones:
 ### zone 을 벗어났을 때 (실패)
 
 `check_safe_zones` 는 내부적으로 **`core.matchers.errors.MatcherError`**
-(`code = SAFE_ZONE_VIOLATION`) 를 raise 하지만, 이 예외는 `run_pipeline` 경계에서
-잡혀 **실패 `MatchResult` 로 변환**되어 반환됩니다. (예외가 외부로 새지 않습니다.)
-**`run_pipeline` 은 어떤 경우에도 예외를 던지지 않습니다.**
+(`error_code = ErrorCode.SAFE_ZONE_VIOLATION`) 를 raise 하지만, 이 예외는
+`run_pipeline` 경계에서 잡혀 **실패 `MatchResult` 로 변환**되어 반환됩니다. (예외가
+외부로 새지 않습니다.) **`run_pipeline` 은 어떤 경우에도 예외를 던지지 않습니다.**
 
 실패 시 `MatchResult` 필드:
 
 | 필드 | 값 |
 |------|-----|
 | `res.success` | `False` |
-| `res.error_code` | `MatcherErrorCode.SAFE_ZONE_VIOLATION` (문자열 값 `"SAFE_ZONE_VIOLATION"`) |
+| `res.error_code` | `ErrorCode.SAFE_ZONE_VIOLATION` (사내 표준 `ErrorCode`, num=504) |
 | `res.error_message` | `point {L\|R} [x, y, z] is outside its safe zone` |
+| `res.code` | 숫자 코드 `MMMSEEE` (예: `20504`) — crp_core 응답/로깅용 |
 | `res.details` | `{"point": "L"\|"R", "position": [x, y, z]}` (벗어난 포인트와 좌표) |
 
+> 사내 표준 예외가 필요하면 `res.to_error()` 로 `MatchingError` 를 얻을 수 있습니다.
 > safe zone 외의 실패도 예외를 던지지 않고 같은 방식으로 실패 `MatchResult` 를
-> 반환하되, **종류별로 코드가 구분**됩니다.
+> 반환하되, **종류별로 `ErrorCode` 가 구분**됩니다.
 >
-> | `error_code` | 의미 |
-> |------|------|
-> | `SAFE_ZONE_VIOLATION` | anchor 가 safe zone 을 벗어남 (`details={"point","position"}`) |
-> | `DEPTH_CALCULATION_FAILED` | anchor depth 계산 결과가 없음(None) |
-> | `STABLE_DEPTH_RANGE_EXCEEDED` | depth 가 안정 범위를 벗어남 (`details={"point","depth_diff","stable_range"}`) |
-> | `MATCHING_FAILED` | 그 외 매칭 실패 (2D/3D 매칭·필터링 등) |
+> | `error_code` (`ErrorCode`) | num | 의미 |
+> |------|------|------|
+> | `SAFE_ZONE_VIOLATION` | 504 | anchor 가 safe zone 을 벗어남 (`details={"point","position"}`) |
+> | `DEPTH_CALCULATION_FAILED` | 502 | anchor depth 계산 결과가 없음(None) |
+> | `DEPTH_OUT_OF_RANGE` | 503 | depth 가 안정 범위를 벗어남 (`details={"point","depth_diff","stable_range"}`) |
+> | `MATCH_FAILED` | 401 | 그 외 매칭 실패 (2D/3D 매칭·필터링 등) |
 
 `run_matcher.py` 처럼 호출 측은 `success` 로 분기하여 아래 한 줄을 ERROR 로 기록합니다.
 
 ```
-ERROR  ❌ Matching failed - {base_name} [SAFE_ZONE_VIOLATION] point L [150.61, 52.31, 1536.67] is outside its safe zone
+ERROR  ❌ Matching failed - {base_name} [20504] SAFE_ZONE_VIOLATION: point L [150.61, 52.31, 1536.67] is outside its safe zone
 ```
 
 ### 호출 측에서 처리 예시
 
 ```python
 from core.matchers.results import MatchResult
-from core.matchers.errors import MatcherErrorCode
+from core.matchers.error_handler import ErrorCode
 
 res = matcher.run_pipeline(...)
 if not res.success:
-    if res.error_code == MatcherErrorCode.SAFE_ZONE_VIOLATION:
+    if res.error_code == ErrorCode.SAFE_ZONE_VIOLATION:
         bad_point = res.details["point"]       # "L" 또는 "R"
         position = res.details["position"]      # [x, y, z]
         # 매칭 실패로 처리 (로봇 이동 금지 등)
         ...
+    # 필요하면 사내 표준 예외로: raise res.to_error()
     return
 # 여기 도달하면 safe zone 통과 (anchor 결과 유효)
 use(res.point_l, res.point_r, res.point_u, res.plane_normal)
 ```
 
-> 에러 코드는 `core/matchers/errors.py` 의 `MatcherErrorCode` 에 정의됩니다. 다른 실패
-> 유형도 동일한 스킴으로 코드를 추가할 수 있습니다.
+> 에러 코드는 `core/matchers/error_handler.py` 의 `ErrorCode` (사내 표준) 에
+> 정의됩니다. reconstruction_module 의 범주 패턴(0/100/200/300/400/500)을 따릅니다.
 
 ## 구현 위치
 
@@ -142,10 +145,12 @@ use(res.point_l, res.point_r, res.point_u, res.plane_normal)
 - `core/matchers/matcher.py`
   - `Matcher.check_safe_zones(result1_3d, result2_3d)` — L/R 검사, 실패 시 내부적으로 `MatcherError` raise
   - `run_pipeline` 내 anchor 3D 확정 직후 호출. 경계에서 `MatcherError` 를 잡아 실패 `MatchResult` 로 변환 후 반환
+- `core/matchers/error_handler.py`
+  - `ErrorCode` (사내 표준 에러 코드 enum), `MatchingError` (사내 표준 예외), `MatchingErrorDefinitions` (crp_core 연동)
 - `core/matchers/errors.py`
-  - `MatcherErrorCode` (에러 코드 enum), `MatcherError` (내부 전달용 예외, code/message/details 보유)
+  - `MatcherError` (내부 전달용 예외, `error_code`(ErrorCode)/message/details 보유)
 - `core/matchers/results.py`
-  - `MatchResult` (run_pipeline 의 공개 반환 타입, success/point_*/plane_normal/error_code/error_message/details)
+  - `MatchResult` (run_pipeline 의 공개 반환 타입; success/point_*/plane_normal/error_code/error_message/severity/details, `code`/`to_error()` 브리지)
 
 ## 좌표 프레임 / 설계 근거
 
