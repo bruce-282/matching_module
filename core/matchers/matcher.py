@@ -26,6 +26,7 @@ sys.path.insert(0, str(project_root))
 
 # 로거 설정
 from core.utils.logger_utils import setup_logger
+from .errors import MatcherError, MatcherErrorCode
 from .models.roma import Roma
 from ..utils.image_utils import resize_image, process_depth_map, apply_roi_mask
 from ..utils.viz_utils import visualize_matches, warp_images
@@ -1059,9 +1060,11 @@ class Matcher:
                 np.array(zone["euler"], dtype=float),
             )
             if not inside:
-                raise Exception(
-                    f"Safe zone check failed: point {name} "
-                    f"{np.asarray(point_3d)} is outside its safe zone"
+                point = np.asarray(point_3d).tolist()
+                raise MatcherError(
+                    MatcherErrorCode.SAFE_ZONE_VIOLATION,
+                    f"point {name} {point} is outside its safe zone",
+                    details={"point": name, "position": point},
                 )
             self.logger.debug(f"Safe zone check passed for point {name}.")
 
@@ -1436,6 +1439,9 @@ class Matcher:
 
             return result1_3d, result2_3d, result3_3d, plane_normal
 
+        except MatcherError:
+            # 코드를 가진 도메인 예외는 그대로 전파 (외부에서 e.code 로 분기)
+            raise
         except Exception as e:
             raise Exception(f"{e}")
 

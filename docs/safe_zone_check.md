@@ -74,38 +74,52 @@ safe_zones:
 | 상황 | `Matcher.run_pipeline` 의 동작 |
 |------|------|
 | 모든 검사 포인트가 zone **안** | 정상 반환: `(result1_3d, result2_3d, result3_3d, plane_normal)` 튜플. `Safe zone check passed for point L/R.` (DEBUG) |
-| 어느 한 포인트라도 zone **밖** | **튜플을 반환하지 않고 `Exception` 을 raise** (아래 참고). 호출 측에서 try/except 로 처리해야 함 |
+| 어느 한 포인트라도 zone **밖** | **에러 코드를 가진 `MatcherError` 를 raise** (`code = SAFE_ZONE_VIOLATION`). 호출 측은 `e.code` 로 분기 처리 |
 | `safe_zones` 미설정 | 검사 skip, 정상 반환 (DEBUG 로그) |
 
 ### zone 을 벗어났을 때 (실패)
 
-`check_safe_zones` 가 `Exception` 을 raise 하고, 이 예외가 `run_pipeline` 밖으로
-그대로 전파됩니다. **`run_pipeline` 은 이 경우 `(None, None, None, None)` 같은 값을
-반환하지 않습니다 — 예외를 던집니다.** 예외 메시지는 다음 형식입니다.
+`check_safe_zones` 가 **`core.matchers.errors.MatcherError`** 를 raise 하고, 이 예외가
+`run_pipeline` 밖으로 **코드를 유지한 채** 그대로 전파됩니다. (일반 실패와 달리 plain
+`Exception` 으로 감싸지 않습니다.) **`run_pipeline` 은 `(None, None, None, None)` 같은
+값을 반환하지 않고 예외를 던집니다.**
+
+예외 객체 필드:
+
+| 필드 | 값 |
+|------|-----|
+| `e.code` | `MatcherErrorCode.SAFE_ZONE_VIOLATION` (문자열 값 `"SAFE_ZONE_VIOLATION"`) |
+| `e.message` | `point {L\|R} [x, y, z] is outside its safe zone` |
+| `e.details` | `{"point": "L"\|"R", "position": [x, y, z]}` (벗어난 포인트와 좌표) |
+| `str(e)` | `[SAFE_ZONE_VIOLATION] point {L\|R} [x, y, z] is outside its safe zone` |
+
+`run_matcher.py` 처럼 호출 측이 예외를 잡으면 해당 입력을 건너뛰며(`continue`) 아래 한
+줄만 ERROR 로 기록됩니다. (성공/실패 분기를 건너뛰므로 `❌ Matching failed` 줄은 출력되지
+않습니다.)
 
 ```
-Safe zone check failed: point {L|R} [{x} {y} {z}] is outside its safe zone
-```
-
-`run_matcher.py` 처럼 호출 측이 예외를 잡으면, 해당 입력을 건너뛰며(`continue`)
-아래 한 줄만 ERROR 로 기록됩니다. (성공/실패 분기를 건너뛰므로
-`❌ Matching failed` 줄은 출력되지 않습니다.)
-
-```
-ERROR  {base_name} - Safe zone check failed: point L [150.61 52.31 1536.67] is outside its safe zone
+ERROR  {base_name} - [SAFE_ZONE_VIOLATION] point L [150.61, 52.31, 1536.67] is outside its safe zone
 ```
 
 ### 호출 측에서 처리 예시
 
 ```python
+from core.matchers.errors import MatcherError, MatcherErrorCode
+
 try:
     result1_3d, result2_3d, result3_3d, plane_normal = matcher.run_pipeline(...)
     # 여기 도달하면 safe zone 통과 (anchor 결과 유효)
-except Exception as e:
-    # str(e) == "Safe zone check failed: point ... is outside its safe zone"
-    # 매칭 실패로 처리 (로봇 이동 금지 등)
-    ...
+except MatcherError as e:
+    if e.code == MatcherErrorCode.SAFE_ZONE_VIOLATION:
+        bad_point = e.details["point"]       # "L" 또는 "R"
+        position = e.details["position"]      # [x, y, z]
+        # 매칭 실패로 처리 (로봇 이동 금지 등)
+        ...
 ```
+
+> 에러 코드는 `core/matchers/errors.py` 의 `MatcherErrorCode` 에 정의됩니다. 현재는 safe
+> zone 위반(`SAFE_ZONE_VIOLATION`)이 정의되어 있으며, 다른 실패 유형도 동일한 스킴으로
+> 코드를 추가할 수 있습니다.
 
 ## 구현 위치
 
@@ -113,8 +127,10 @@ except Exception as e:
   - `euler_to_rotation_matrix(rx, ry, rz)` — Three.js XYZ(intrinsic) 회전행렬
   - `is_point_in_safe_zone(point, min, max, euler)` — OBB 내부 판정
 - `core/matchers/matcher.py`
-  - `Matcher.check_safe_zones(result1_3d, result2_3d)` — L/R 검사, 실패 시 raise
+  - `Matcher.check_safe_zones(result1_3d, result2_3d)` — L/R 검사, 실패 시 `MatcherError` raise
   - `run_pipeline` 내 anchor 3D 확정 직후 호출
+- `core/matchers/errors.py`
+  - `MatcherErrorCode` (에러 코드 enum), `MatcherError` (code/message/details 보유)
 
 ## 좌표 프레임 / 설계 근거
 
