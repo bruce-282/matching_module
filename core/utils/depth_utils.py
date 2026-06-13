@@ -99,6 +99,10 @@ def find_depth_from_2d_robust(
                     depths.append(z)
 
     if len(depths) == 0:
+        logger.debug(
+            f"find_depth_from_2d_robust: no valid depth at pixel ({u}, {v}) "
+            f"within radius {radius} (point may be off-image or on a depth hole)"
+        )
         return None
 
     # 중앙값 사용 (outlier에 강함)

@@ -821,19 +821,28 @@ class Matcher:
                 target_depth, (int(point1_2d[0]), int(point1_2d[1])), radius
             )
             if z1 is None:
-                self.logger.error(f"pointL depth calculation failed")
+                self.logger.error(
+                    f"pointL depth calculation failed at pixel "
+                    f"({int(point1_2d[0])}, {int(point1_2d[1])}), radius {radius}"
+                )
                 return None
             z2 = find_depth_from_2d_robust(
                 target_depth, (int(point2_2d[0]), int(point2_2d[1])), radius
             )
             if z2 is None:
-                self.logger.error(f"pointR depth calculation failed")
+                self.logger.error(
+                    f"pointR depth calculation failed at pixel "
+                    f"({int(point2_2d[0])}, {int(point2_2d[1])}), radius {radius}"
+                )
                 return z1, None, None
             z3 = find_depth_from_2d_robust(
                 target_depth, (int(point3_2d[0]), int(point3_2d[1])), radius
             )
             if z3 is None:
-                self.logger.error(f"pointU depth calculation failed")
+                self.logger.error(
+                    f"pointU depth calculation failed at pixel "
+                    f"({int(point3_2d[0])}, {int(point3_2d[1])}), radius {radius}"
+                )
                 return z1, z2, None
             else:
                 self.logger.debug(
@@ -870,14 +879,17 @@ class Matcher:
             z2 = find_depth_from_2d_robust(depth_image, (u2, v2), radius)
             z3 = find_depth_from_2d_robust(depth_image, (u3, v3), radius)
 
-            if z1 is not None and z2 is not None and z3 is not None:
-                self.logger.debug(
-                    f"Depth calculation completed: {z1:.1f}, {z2:.1f}, {z3:.1f}"
+            missing = [n for n, z in (("L", z1), ("R", z2), ("U", z3)) if z is None]
+            if missing:
+                self.logger.error(
+                    f"Depth calculation failed for point(s) {missing} "
+                    f"(pixels L=({u1},{v1}) R=({u2},{v2}) U=({u3},{v3}), radius {radius})"
                 )
-                return z1, z2, z3
-            else:
-                self.logger.error("Depth calculation failed")
                 return None
+            self.logger.debug(
+                f"Depth calculation completed: {z1:.1f}, {z2:.1f}, {z3:.1f}"
+            )
+            return z1, z2, z3
 
         except Exception as e:
             self.logger.error(f"3D point calculation failed: {e}")
@@ -1264,7 +1276,10 @@ class Matcher:
                 or self.template_param.get("matching_model", {}).get("selected_points")
             )
             if selected_points is None or not selected_points:
-                raise Exception("Selected points are not set")
+                raise MatcherError(
+                    ErrorCode.INVALID_PARAM,
+                    "selected_points not set in template_param",
+                )
             anchor_point1_3d = get_point_by_config(selected_points, "L")
             anchor_point2_3d = get_point_by_config(selected_points, "R")
             anchor_point3_3d = get_point_by_config(selected_points, "U")
@@ -1342,7 +1357,10 @@ class Matcher:
 
                 selected_points = self.template_param.get("selected_points", {})
                 if selected_points is None:
-                    raise Exception("Selected points are not set")
+                    raise MatcherError(
+                        ErrorCode.INVALID_PARAM,
+                        "selected_points not set in template_param",
+                    )
 
                 transform_matrix = result["transformation"]
 
