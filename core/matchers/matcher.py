@@ -150,8 +150,11 @@ class Matcher:
 
         self.camera_target = None
         self.camera_source = None
-        # 현재(runtime) 카메라 hand-eye 캘리브레이션 (current cam -> robot, 4x4).
-        # safe zone 을 로봇 프레임에서 검사할 때 사용. init_config 에서 채워진다.
+        # hand-eye 캘리브레이션 (cam -> robot, 4x4). safe zone 로봇 프레임 검사용.
+        #  - template(teaching): template_param 에서 init 시 1회 파싱해 캐싱.
+        #  - runtime(매칭): run_pipeline 의 target_camera_extrinsic 인자로 매 호출 전달.
+        #    (없으면 config 의 camera_calibration 으로 fallback)
+        self.template_camera_calibration = None
         self.runtime_camera_calibration = None
 
         self.init_config(config=config, template_param=template_param)
@@ -233,8 +236,20 @@ class Matcher:
             self.logger.error(f"YAML camera target configuration load failed: {e}")
             raise e
 
-        # 현재(runtime) 카메라 hand-eye 캘리브레이션 (current cam -> robot, 4x4).
-        # safe zone 을 로봇 프레임에서 검사하기 위해 모듈 초기화 시 받는다. (선택값)
+        # 템플릿(teaching) 카메라 hand-eye 캘리브레이션 (teaching cam -> robot, 4x4).
+        # template_param 에 정의되며, intrinsic 처럼 init 시 한 번만 파싱해 캐싱한다.
+        raw_teach = None
+        if self.template_param:
+            raw_teach = self.template_param.get("camera_calibration") or (
+                self.template_param.get("matching_model", {}).get("camera_calibration")
+            )
+        self.template_camera_calibration = self._parse_camera_calibration(
+            raw_teach, source="template"
+        )
+
+        # 현재(runtime/매칭) 카메라 hand-eye 캘리브레이션 fallback (current cam -> robot, 4x4).
+        # 매칭용은 원칙적으로 run_pipeline 의 target_camera_extrinsic 인자로 받지만,
+        # config 에 있으면 인자 미전달 시 fallback 으로 쓴다. (선택값)
         self.runtime_camera_calibration = self._parse_camera_calibration(
             self.config.get("camera_calibration"), source="runtime config"
         )
@@ -1065,22 +1080,27 @@ class Matcher:
             self.logger.warning(f"camera_calibration ({source}) 파싱 실패: {e}")
             return None
 
-    def _safe_zone_calibrations(self):
+    def _safe_zone_calibrations(self, runtime_calibration=None):
         """safe zone 을 로봇 프레임에서 검사하기 위한 (T_teach, T_runtime) 4x4 쌍을
         반환한다. 둘 다 있을 때만 쌍을 반환하고, 하나라도 없으면 None 을 반환해
         카메라 프레임에서 직접 비교한다(하위 호환).
 
-        - T_teach   : 템플릿(teaching) 카메라 -> 로봇. template_param 에서 파싱.
+        - T_teach   : 템플릿(teaching) 카메라 -> 로봇. **template_param** 에서 파싱.
                       safe_zones(템플릿 프레임)를 로봇 프레임으로 변환하는 데 사용.
-        - T_runtime : 현재(runtime) 카메라 -> 로봇. 모듈 초기화 시 받음.
+        - T_runtime : 현재(매칭) 카메라 -> 로봇. **run_pipeline 의 target_camera_extrinsic
+                      인자**(runtime_calibration)로 전달(우선). 없으면 모듈 config 의
+                      camera_calibration(self.runtime_camera_calibration)로 fallback.
                       result_3d(현재 카메라 프레임)를 로봇 프레임으로 변환하는 데 사용.
         """
-        # teaching(template) 캘리브레이션: template_param 최상위 -> matching_model
-        raw_teach = self.template_param.get("camera_calibration") or (
-            self.template_param.get("matching_model", {}).get("camera_calibration")
+        # teaching(template) 캘리브레이션: init 시 1회 파싱해 캐싱한 값 사용
+        T_teach = self.template_camera_calibration
+
+        # 매칭(runtime) 캘리브레이션: run_pipeline 인자 우선, 없으면 config fallback
+        T_runtime = self._parse_camera_calibration(
+            runtime_calibration, source="run_pipeline argument"
         )
-        T_teach = self._parse_camera_calibration(raw_teach, source="template")
-        T_runtime = self.runtime_camera_calibration
+        if T_runtime is None:
+            T_runtime = self.runtime_camera_calibration
 
         if T_teach is None and T_runtime is None:
             return None  # 캘리브레이션 미제공 -> 기존 동작(카메라 프레임 직접 비교)
@@ -1094,7 +1114,10 @@ class Matcher:
         return T_teach, T_runtime
 
     def check_safe_zones(
-        self, result1_3d: np.ndarray, result2_3d: np.ndarray
+        self,
+        result1_3d: np.ndarray,
+        result2_3d: np.ndarray,
+        runtime_calibration: Optional[np.ndarray] = None,
     ) -> None:
         """
         매칭으로 구한 anchor 포인트 L, R이 설정된 safe zone(회전 큐보이드, OBB)
@@ -1120,6 +1143,10 @@ class Matcher:
         Args:
             result1_3d: Point L 의 3D 좌표 [x, y, z] (현재 카메라 프레임)
             result2_3d: Point R 의 3D 좌표 [x, y, z] (현재 카메라 프레임)
+            runtime_calibration: 현재(매칭) 카메라 hand-eye (cam->robot, 4x4).
+                run_pipeline 의 target_camera_extrinsic 인자로 전달된다. None 이면
+                모듈 config 의 camera_calibration 로 fallback. (teaching 캘리브레이션은
+                template_param 에서 읽는다.)
         """
         if not self.template_param:
             return
@@ -1134,7 +1161,7 @@ class Matcher:
             return
 
         # 로봇 프레임 검사용 캘리브레이션 쌍 (둘 다 있을 때만, 아니면 None=직접 비교)
-        calibrations = self._safe_zone_calibrations()
+        calibrations = self._safe_zone_calibrations(runtime_calibration)
         if calibrations is not None:
             self.logger.debug("Safe zone check in robot frame (hand-eye calibration applied).")
 
@@ -1181,7 +1208,9 @@ class Matcher:
         target_camera_path: Optional[str] = None,
         target_texture_path: Optional[str] = None,
         target_depth_path: Optional[str] = None,
+        target_camera_extrinsic: Optional[np.ndarray] = None,
         output_dir: Optional[str] = None,
+        
     ) -> MatchResult:
         """
         전체 파이프라인 실행
@@ -1528,7 +1557,9 @@ class Matcher:
             # Safe zone 안전장치: 포즈가 적용된 anchor 결과 L, R이 템플릿/월드 좌표에
             # 고정된 safe zone(회전 큐보이드) 안에 있는지 확인하고, 벗어나면(=매칭/포즈
             # 추정이 잘못되어 엉뚱한 위치) 매칭 실패로 처리한다. (depth 계산 실패와 동일)
-            self.check_safe_zones(result1_3d, result2_3d)
+            self.check_safe_zones(
+                result1_3d, result2_3d, runtime_calibration=target_camera_extrinsic
+            )
 
             plane_normal = compute_plane_normal(result1_3d, result2_3d, result3_3d)
 
