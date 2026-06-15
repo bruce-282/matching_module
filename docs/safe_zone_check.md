@@ -70,11 +70,11 @@ safe_zones:
 # (선택) hand-eye 캘리브레이션 — 있으면 로봇 프레임에서 검사한다.
 # 카메라 -> 로봇(base) 변환 (= inv(T_base2cam)). p_robot = camera_calibration @ p_cam.
 # 여기 것은 템플릿(teaching) 카메라 -> 로봇, 4x4 (template_param 에 저장)
-camera_calibration:
-  - [1.0, 0.0, 0.0, 0.0]
-  - [0.0, 1.0, 0.0, 0.0]
-  - [0.0, 0.0, 1.0, 0.0]
-  - [0.0, 0.0, 0.0, 1.0]
+# 형식: 4x4 중첩 리스트 (flow 또는 block 모두 인식)
+camera_calibration: [[-0.83741, 0.53790, 0.09698, 1837.13142],
+                     [-0.32729, -0.35139, -0.87716, 177.98382],
+                     [-0.43774, -0.76628, 0.47031, 2297.80091],
+                     [0.0, 0.0, 0.0, 1.0]]
 ```
 
 현재(매칭/runtime) 카메라 캘리브레이션은 **`run_pipeline(target_camera_extrinsic=...)`
