@@ -77,10 +77,12 @@ camera_calibration:
   - [0.0, 0.0, 0.0, 1.0]
 ```
 
-현재(runtime) 카메라 캘리브레이션은 **모듈 설정(config)** 의 `camera_calibration`
-(동일한 4x4 형식)으로 전달하며, `Matcher` 생성/`init_config` 시 읽는다. teaching/runtime
-두 캘리브레이션이 **모두 있을 때만** 로봇 프레임 검사가 활성화되고, 없으면 카메라
-프레임에서 직접 비교한다(하위 호환). 4x4 는 중첩 리스트 또는 길이 16 시퀀스 모두 인식.
+현재(매칭/runtime) 카메라 캘리브레이션은 **`run_pipeline(target_camera_extrinsic=...)`
+인자**(동일한 4x4 형식)로 매 호출 전달한다. (인자 미전달 시 모듈 config 의
+`camera_calibration` 으로 fallback.) 반면 **teaching 캘리브레이션은 `template_param`
+에서 `init_config` 시 1회 파싱해 캐싱**한다. teaching/runtime 두 캘리브레이션이 **모두
+있을 때만** 로봇 프레임 검사가 활성화되고, 없으면 카메라 프레임에서 직접 비교한다(하위
+호환). 4x4 는 중첩 리스트 또는 길이 16 시퀀스 모두 인식.
 
 > **방향 주의**: `camera_calibration` 은 **카메라 → 로봇(base)** 변환이다. 즉
 > `T_cam2base = inv(T_base2cam)` 이며, 카메라 좌표 점을 그대로 곱해 로봇 좌표로 보낸다
@@ -179,9 +181,9 @@ safe zone 검사를 **로봇 프레임**에서 수행하기 위해, 카메라↔
 - [x] **템플릿(teaching) 카메라 캘리브레이션**: `template_param`(최상위 또는
       `matching_model` 하위)에서 파싱. 템플릿 프레임에 정의된 `safe_zones`를 로봇
       프레임으로 변환하는 데 사용. (`T_teach`)
-- [x] **현재(runtime) 카메라 캘리브레이션**: 동일한 4x4 형식. **모듈 초기화 시**
-      (`Matcher` 생성 / `init_config`) 모듈 config 의 `camera_calibration` 에서 읽는다.
-      현재 카메라 프레임의 `result_3d`를 로봇 프레임으로 변환하는 데 사용. (`T_runtime`)
+- [x] **현재(매칭/runtime) 카메라 캘리브레이션**: 동일한 4x4 형식. **`run_pipeline` 의
+      `target_camera_extrinsic` 인자**로 매 호출 전달(없으면 config fallback). 현재 카메라
+      프레임의 `result_3d`를 로봇 프레임으로 변환하는 데 사용. (`T_runtime`)
 - [x] `check_safe_zones` 가 두 캘리브레이션으로 `result_3d`와 `safe_zones`를 **모두
       로봇 프레임으로 모아서** OBB 내부를 판정한다. 두 캘리브레이션이 모두 있을 때만
       활성화되며, 하나라도 없으면 카메라 프레임 직접 비교로 fallback(하위 호환).
@@ -204,7 +206,7 @@ flowchart TB
     M["매칭 + 포즈 추정"] --> R["result_3d<br/>(현재 카메라 프레임)<br/>anchor L · R"]
     T["safe_zones<br/>(템플릿 카메라 프레임)<br/>OBB: min/max + euler"]
 
-    R -->|"현재 camera_calibration<br/>4x4 (current cam → robot)<br/>모듈 초기화 시 수신"| RB["result_3d<br/>(로봇 프레임)"]
+    R -->|"현재 camera_calibration<br/>4x4 (current cam → robot)<br/>run_pipeline 인자(target_camera_extrinsic)"| RB["result_3d<br/>(로봇 프레임)"]
     T -->|"템플릿 camera_calibration<br/>4x4 (teaching cam → robot)<br/>template_param 에서 파싱"| TB["safe_zone<br/>(로봇 프레임)"]
 
     RB --> C{"로봇 프레임에서<br/>OBB 내부 판정"}
