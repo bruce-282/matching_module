@@ -163,6 +163,14 @@ safe_zones:
     min: [514.7950, 295.5452, 1820.6679]
     max: [661.8052, 180.7805, 1770.4976]
     euler: [2.7066, 0.5931, -0.1091]
+
+# (선택) hand-eye 캘리브레이션 (teaching 카메라 -> 로봇, 4x4 = inv(T_base2cam)).
+# 있으면 safe zone을 로봇 프레임에서 검사. 매칭(현재 카메라)용은 template이 아니라
+# run_pipeline(target_camera_extrinsic=...) 인자로 전달한다.
+camera_calibration: [[-0.837413760161382, 0.5378965419296572, 0.09698198014317819, 1837.131417220074],
+                     [-0.3272940313623728, -0.3513913556545883, -0.8771560478077985, 177.9838240236977],
+                     [-0.43774057537192235, -0.7662841674935921, 0.47031028409095144, 2297.800906280515],
+                     [0.0, 0.0, 0.0, 1.0]]
 ```
 
 템플릿 파라미터 파일 항목 설명:
@@ -170,11 +178,12 @@ safe_zones:
 - `path_match_source`: 매칭 템플릿(소스) 이미지 경로
 - `camera_intrinsics` / `camera_distortions` / `image_size`: 템플릿(소스) 카메라 파라미터. 소스 카메라(`camera_source`) 객체 생성에 사용됩니다.
 - `selected_points` (L, R, U): 매칭 대상 anchor 포인트의 3D 좌표
-- `safe_zones` (선택): `L`, `R` anchor가 유효 영역을 벗어날 때 매칭을 실패 처리하는 안전장치. 자세한 동작은 [Safe Zone Check Process](docs/safe_zone_check.md) 참고.
+- `safe_zones` (선택): `L`, `R` anchor가 유효 영역(회전 큐보이드 OBB)을 벗어나면 매칭을 실패 처리하는 안전장치. `camera_calibration`이 함께 주어지면 **로봇 프레임**에서 검사하고, 없으면 카메라 프레임에서 직접 비교합니다. 자세한 동작은 [Safe Zone Check Process](docs/safe_zone_check.md) 참고.
+- `camera_calibration` (선택): **teaching 카메라 → 로봇** hand-eye 변환(4x4). safe zone을 로봇 프레임으로 옮겨 검사하는 데 사용합니다(init 시 1회 파싱). 매칭(현재) 카메라용은 `run_pipeline(target_camera_extrinsic=...)` 인자로 전달합니다.
 
-> 참고: `path_match_source`, `selected_points`, `safe_zones`는 최상위 또는 `matching_model:`
-> 하위 어디에 있어도 인식됩니다. 프로덕션 파일에 포함될 수 있는 `url`, `updated_at` 등의
-> 메타데이터 필드는 매처가 사용하지 않습니다.
+> 참고: `path_match_source`, `selected_points`, `safe_zones`, `camera_calibration`은 최상위 또는
+> `matching_model:` 하위 어디에 있어도 인식됩니다. 프로덕션 파일에 포함될 수 있는 `url`,
+> `updated_at` 등의 메타데이터 필드는 매처가 사용하지 않습니다.
 
 ## 입력 파일
 
@@ -284,6 +293,9 @@ transformed_points:
 ## 주요 변경사항
 
 ### 최신 업데이트
+- **Safe Zone 안전장치**: anchor(`L`/`R`)가 유효 영역(OBB)을 벗어나면 매칭 실패로 처리. hand-eye 캘리브레이션(`camera_calibration`)이 주어지면 **로봇 프레임**에서 검사 → [Safe Zone Check Process](docs/safe_zone_check.md)
+- **결과 객체 반환**: `run_pipeline`이 예외를 던지지 않고 `MatchResult`(`success` / `point_l·r·u` / `plane_normal` / `error_code` 등)를 반환. 실패는 사내 표준 `ErrorCode`로 구분 → [Error Codes](docs/error_codes.md)
+- **파라미터/파싱 견고화**: 필수 키 누락 시 명확한 에러(예: `camera_intrinsics`)와 `INVALID_PARAM` 분류, depth 실패 진단 로그 보강
 - **설정 파일 기반 구동**: CLI 인자 대신 YAML 설정 파일 사용
 - **템플릿 파라미터 분리**: 소스 이미지 및 3D 포인트 좌표를 별도 파일로 관리
 - **카메라 거리 계산 개선**: 포인트 클라우드 크기 대신 매칭 포인트 간 거리 기반 계산 (노이즈에 강건)
