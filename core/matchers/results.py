@@ -19,8 +19,8 @@
         return
     use(res.point_l, res.point_r, res.point_u, res.plane_normal)
 
-crp_core 응답/로깅에서 사내 표준 예외가 필요하면 ``res.to_error()`` 로 ``MatchingError``
-를, 숫자 코드는 ``res.code`` (MMMSEEE) 로 얻는다.
+로깅/응답에서 사내 표준 예외가 필요하면 ``res.to_error()`` 로 ``MatchingError`` 를,
+숫자 코드는 ``res.code`` (MMMSEEE) 로 얻는다.
 """
 
 from dataclasses import dataclass, field
@@ -102,7 +102,7 @@ class MatchResult:
         return self.error_code.code_str(self.severity)
 
     def to_error(self) -> MatchingError:
-        """사내 표준 예외(``MatchingError``)로 변환. (crp_core 응답/로깅용)
+        """사내 표준 예외(``MatchingError``)로 변환. (로깅/응답용)
 
         성공 결과에 호출하면 안 된다(error_code 가 None).
         """

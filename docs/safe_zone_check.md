@@ -116,7 +116,7 @@ camera_calibration:
 | `res.success` | `False` |
 | `res.error_code` | `ErrorCode.SAFE_ZONE_VIOLATION` (사내 표준 `ErrorCode`, num=504) |
 | `res.error_message` | `point {L\|R} [x, y, z] is outside its safe zone` |
-| `res.code` | 숫자 코드 `MMMSEEE` (예: `30504` — MMM=000, S=3, EEE=504) — crp_core 응답/로깅용 |
+| `res.code` | 숫자 코드 `MMMSEEE` (예: `30504` — MMM=000, S=3, EEE=504) — 로깅/응답용 |
 | `res.details` | `{"point": "L"\|"R", "position": [x, y, z]}` (벗어난 포인트와 좌표) |
 
 > 사내 표준 예외가 필요하면 `res.to_error()` 로 `MatchingError` 를 얻을 수 있습니다.

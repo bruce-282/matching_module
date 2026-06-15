@@ -9,12 +9,6 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from crp_core.error_handler import (
-    ErrorLevel,
-    ErrorInfo,
-    BaseErrorDefinitions,
-)
-
 
 # 사내 모듈 번호 (3 자리). error code 의 MMMSEEE 인코딩에서 prefix 부분에 들어간다.
 MODULE_NAME = "000"
@@ -109,62 +103,4 @@ class MatchingError(Exception):
         return (
             f"MatchingError({self.error_code.name}, "
             f"severity={self.severity}, message={self.message!r})"
-        )
-
-
-class MatchingErrorDefinitions(BaseErrorDefinitions):
-    """Matching module error definitions for crp_core integration."""
-
-    @property
-    def REQ_INIT_FAILED(self) -> ErrorInfo:
-        return self.create_error_info(
-            level=ErrorLevel.ERROR,
-            error_id=ErrorCode.ENGINE_INIT_FAILED.num,
-            message="Matcher engine initialization failed",
-            solution="Check config YAML and installed dependencies (RoMa V2 weights)",
-        )
-
-    @property
-    def REQ_LOAD_CONFIG_FAILED(self) -> ErrorInfo:
-        return self.create_error_info(
-            level=ErrorLevel.ERROR,
-            error_id=ErrorCode.TEMPLATE_INVALID.num,
-            message="Template loading failed",
-            solution="Check template_config schema (path_match_source, selected_points, camera_intrinsics, etc.)",
-        )
-
-    @property
-    def REQ_MATCH_FAILED(self) -> ErrorInfo:
-        return self.create_error_info(
-            level=ErrorLevel.NORMAL,
-            error_id=ErrorCode.MATCH_FAILED.num,
-            message="Matching failed",
-            solution="Check input depth/texture and template alignment",
-        )
-
-    @property
-    def REQ_RESET_FAILED(self) -> ErrorInfo:
-        return self.create_error_info(
-            level=ErrorLevel.ERROR,
-            error_id=ErrorCode.SYSTEM_RESET_FAILED.num,
-            message="Module reset failed",
-            solution="Restart the module process",
-        )
-
-    @property
-    def NOT_INITIALIZED(self) -> ErrorInfo:
-        return self.create_error_info(
-            level=ErrorLevel.WARNING,
-            error_id=ErrorCode.NOT_INITIALIZED.num,
-            message="Module not initialized",
-            solution="Call req_init before other requests",
-        )
-
-    @property
-    def TEMPLATE_NOT_LOADED(self) -> ErrorInfo:
-        return self.create_error_info(
-            level=ErrorLevel.WARNING,
-            error_id=ErrorCode.TEMPLATE_NOT_LOADED.num,
-            message="Template not loaded",
-            solution="Call req_load_config before req_match",
         )

@@ -86,8 +86,7 @@ ErrorCode.SAFE_ZONE_VIOLATION.code_str("3")   # -> 30504
 
 > 나머지 코드(`NOT_INITIALIZED`, `FILE_NOT_FOUND`, `ENGINE_INIT_FAILED`,
 > `TEMPLATE_*` 등)는 사내 표준 스킴과 요청 단위(req_init / req_load_config / req_reset)
-> 핸들러·`MatchingErrorDefinitions`(crp_core 연동)를 위해 **정의되어 있으나**, 현재
-> `run_pipeline` 자체에서는 사용하지 않는다.
+> 핸들러를 위해 **정의되어 있으나**, 현재 `run_pipeline` 자체에서는 사용하지 않는다.
 
 ## 결과 / 예외 표현
 
@@ -96,7 +95,7 @@ ErrorCode.SAFE_ZONE_VIOLATION.code_str("3")   # -> 30504
   `details` 가 채워진다. `res.code`(숫자 `MMMSEEE`), `res.to_error()`(→ `MatchingError`)
   브리지 제공.
 - `core/matchers/error_handler.py` `MatchingError` — 사내 표준 예외(`error_code` +
-  `severity` + 숫자 `code`). crp_core 응답/로깅용.
+  `severity` + 숫자 `code`). 로깅/응답용.
 - `core/matchers/errors.py` `MatcherError` — 파이프라인 **내부** 신호용 예외
   (`ErrorCode` + `details`). `run_pipeline` 경계에서 `MatchResult` 로 변환되며 외부로
   새지 않는다.
