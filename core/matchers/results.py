@@ -1,8 +1,9 @@
 """Matcher 파이프라인 결과 객체.
 
-``run_pipeline`` 은 예외를 던지지 않고 **항상 ``MatchResult`` 를 반환**한다.
-상위(in-process) 호출 측은 try/except 없이 ``success`` 플래그로 분기하고, 실패 시
-사내 표준 ``error_code`` (``ErrorCode``) 로 원인을 구분한다.
+``run_pipeline`` 은 파이프라인 처리 중의 실패(매칭/depth/safe zone)를 예외 대신
+**``MatchResult`` 로 반환**한다(초기 인자/config 검증 단계의 비정상 입력은 예외 가능).
+상위(in-process) 호출 측은 ``success`` 플래그로 분기하고, 실패 시 사내 표준
+``error_code`` (``ErrorCode``) 로 원인을 구분한다.
 
 예시::
 
@@ -18,8 +19,8 @@
         return
     use(res.point_l, res.point_r, res.point_u, res.plane_normal)
 
-crp_core 응답/로깅에서 사내 표준 예외가 필요하면 ``res.to_error()`` 로 ``MatchingError``
-를, 숫자 코드는 ``res.code`` (MMMSEEE) 로 얻는다.
+로깅/응답에서 사내 표준 예외가 필요하면 ``res.to_error()`` 로 ``MatchingError`` 를,
+숫자 코드는 ``res.code`` (MMMSEEE) 로 얻는다.
 """
 
 from dataclasses import dataclass, field
@@ -101,7 +102,7 @@ class MatchResult:
         return self.error_code.code_str(self.severity)
 
     def to_error(self) -> MatchingError:
-        """사내 표준 예외(``MatchingError``)로 변환. (crp_core 응답/로깅용)
+        """사내 표준 예외(``MatchingError``)로 변환. (로깅/응답용)
 
         성공 결과에 호출하면 안 된다(error_code 가 None).
         """

@@ -69,7 +69,8 @@ ErrorCode.SAFE_ZONE_VIOLATION.code_str("3")   # -> 30504
 
 ## `run_pipeline` 이 실제로 반환하는 코드
 
-`Matcher.run_pipeline` 은 예외를 던지지 않고 항상 `MatchResult` 를 반환한다(아래 참고).
+`Matcher.run_pipeline` 은 파이프라인 처리 중의 실패를 예외 대신 `MatchResult` 로 반환한다
+(아래 참고. 초기 인자/config 검증 단계의 비정상 입력은 예외가 날 수 있음).
 **현재 파이프라인이 실패 시 사용하는 코드**는 다음 4개다.
 
 | `error_code` | 발생 조건 | `details` |
@@ -77,12 +78,15 @@ ErrorCode.SAFE_ZONE_VIOLATION.code_str("3")   # -> 30504
 | `SAFE_ZONE_VIOLATION` | anchor L/R 이 safe zone 을 벗어남 | `{"point", "position"}` |
 | `DEPTH_CALCULATION_FAILED` | anchor depth 계산 결과 없음(None) | `{"depths"}` (해당 시) |
 | `DEPTH_OUT_OF_RANGE` | depth 가 안정 범위(`stable_depth_range`)를 초과 | `{"point", "depth_diff", "stable_range"}` |
+| `INVALID_PARAM` | 필수 config/파라미터 키 누락 (예: `target_depth_path`, `enable_3d_matching`) | — |
 | `MATCH_FAILED` | 그 외 매칭 실패 (2D/3D 매칭·필터링, 예기치 못한 오류 등) | — |
+
+> 설정 키 누락은 `KeyError` 를 잡아 `INVALID_PARAM` 으로 분류하며, 누락된 키 이름을
+> `error_message` 에 담는다(예: `missing required config/parameter key: 'enable_3d_matching'`).
 
 > 나머지 코드(`NOT_INITIALIZED`, `FILE_NOT_FOUND`, `ENGINE_INIT_FAILED`,
 > `TEMPLATE_*` 등)는 사내 표준 스킴과 요청 단위(req_init / req_load_config / req_reset)
-> 핸들러·`MatchingErrorDefinitions`(crp_core 연동)를 위해 **정의되어 있으나**, 현재
-> `run_pipeline` 자체에서는 사용하지 않는다.
+> 핸들러를 위해 **정의되어 있으나**, 현재 `run_pipeline` 자체에서는 사용하지 않는다.
 
 ## 결과 / 예외 표현
 
@@ -91,7 +95,7 @@ ErrorCode.SAFE_ZONE_VIOLATION.code_str("3")   # -> 30504
   `details` 가 채워진다. `res.code`(숫자 `MMMSEEE`), `res.to_error()`(→ `MatchingError`)
   브리지 제공.
 - `core/matchers/error_handler.py` `MatchingError` — 사내 표준 예외(`error_code` +
-  `severity` + 숫자 `code`). crp_core 응답/로깅용.
+  `severity` + 숫자 `code`). 로깅/응답용.
 - `core/matchers/errors.py` `MatcherError` — 파이프라인 **내부** 신호용 예외
   (`ErrorCode` + `details`). `run_pipeline` 경계에서 `MatchResult` 로 변환되며 외부로
   새지 않는다.

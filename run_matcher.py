@@ -90,18 +90,25 @@ def main():
         logger.warning(f"Warning: No *_depth.tif files found in {input_dir}")
         return
 
+    # 필수 카메라 설정 검증 (누락 시 명확히 안내하고 종료)
+    camera_intrinsics = config.get("camera_intrinsics")
+    if not isinstance(camera_intrinsics, dict):
+        logger.error("config에 'camera_intrinsics'(fx, fy, cx, cy)가 없습니다.")
+        return
+    missing_keys = [k for k in ("fx", "fy", "cx", "cy") if k not in camera_intrinsics]
+    if missing_keys:
+        logger.error(f"'camera_intrinsics'에 다음 키가 없습니다: {missing_keys}")
+        return
+
+    image_size = config.get("image_size")
+    if not isinstance(image_size, dict) or "width" not in image_size or "height" not in image_size:
+        logger.error("config에 'image_size'(width, height)가 없습니다.")
+        return
+
     intrinsic_matrix = np.array(
         [
-            [
-                config.get("camera_intrinsics").get("fx"),
-                0,
-                config.get("camera_intrinsics").get("cx"),
-            ],
-            [
-                0,
-                config.get("camera_intrinsics").get("fy"),
-                config.get("camera_intrinsics").get("cy"),
-            ],
+            [camera_intrinsics["fx"], 0, camera_intrinsics["cx"]],
+            [0, camera_intrinsics["fy"], camera_intrinsics["cy"]],
             [0, 0, 1],
         ]
     )
@@ -117,8 +124,8 @@ def main():
     
     source_image = read_image(
         path_match_source,
-        width=config.get("image_size").get("width"),
-        height=config.get("image_size").get("height"),
+        width=image_size["width"],
+        height=image_size["height"],
         intrinsic_matrix=intrinsic_matrix,
     )
     if source_image is None:

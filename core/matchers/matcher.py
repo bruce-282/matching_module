@@ -110,6 +110,10 @@ class Matcher:
             # 3D 매칭 설정
             "pose_estimation_method": "ransac",
             "stable_depth_range": 50.0,
+            # 이미지 보정/시각화 기본값 (누락 시 KeyError 방지 — optional)
+            "image_undistortion": False,
+            "result_image_contrast": 1.0,
+            "result_image_brighten": 0,
         }
         if config.get("debug_mode", False):
             self.logger = setup_logger(__name__, logging.DEBUG)
@@ -817,19 +821,28 @@ class Matcher:
                 target_depth, (int(point1_2d[0]), int(point1_2d[1])), radius
             )
             if z1 is None:
-                self.logger.error(f"pointL depth calculation failed")
+                self.logger.error(
+                    f"pointL depth calculation failed at pixel "
+                    f"({int(point1_2d[0])}, {int(point1_2d[1])}), radius {radius}"
+                )
                 return None
             z2 = find_depth_from_2d_robust(
                 target_depth, (int(point2_2d[0]), int(point2_2d[1])), radius
             )
             if z2 is None:
-                self.logger.error(f"pointR depth calculation failed")
+                self.logger.error(
+                    f"pointR depth calculation failed at pixel "
+                    f"({int(point2_2d[0])}, {int(point2_2d[1])}), radius {radius}"
+                )
                 return z1, None, None
             z3 = find_depth_from_2d_robust(
                 target_depth, (int(point3_2d[0]), int(point3_2d[1])), radius
             )
             if z3 is None:
-                self.logger.error(f"pointU depth calculation failed")
+                self.logger.error(
+                    f"pointU depth calculation failed at pixel "
+                    f"({int(point3_2d[0])}, {int(point3_2d[1])}), radius {radius}"
+                )
                 return z1, z2, None
             else:
                 self.logger.debug(
@@ -866,14 +879,17 @@ class Matcher:
             z2 = find_depth_from_2d_robust(depth_image, (u2, v2), radius)
             z3 = find_depth_from_2d_robust(depth_image, (u3, v3), radius)
 
-            if z1 is not None and z2 is not None and z3 is not None:
-                self.logger.debug(
-                    f"Depth calculation completed: {z1:.1f}, {z2:.1f}, {z3:.1f}"
+            missing = [n for n, z in (("L", z1), ("R", z2), ("U", z3)) if z is None]
+            if missing:
+                self.logger.error(
+                    f"Depth calculation failed for point(s) {missing} "
+                    f"(pixels L=({u1},{v1}) R=({u2},{v2}) U=({u3},{v3}), radius {radius})"
                 )
-                return z1, z2, z3
-            else:
-                self.logger.error("Depth calculation failed")
                 return None
+            self.logger.debug(
+                f"Depth calculation completed: {z1:.1f}, {z2:.1f}, {z3:.1f}"
+            )
+            return z1, z2, z3
 
         except Exception as e:
             self.logger.error(f"3D point calculation failed: {e}")
@@ -1180,48 +1196,50 @@ class Matcher:
             output_dir: 출력 디렉토리
 
         Returns:
-            MatchResult. 예외를 던지지 않고 항상 결과 객체를 반환한다.
+            MatchResult. 파이프라인 처리 중의 실패(매칭/depth/safe zone)는 예외 대신
+            결과 객체로 반환한다. (초기 인자/config 검증 단계의 비정상 입력은 예외 가능.)
             - 성공: success=True, point_l/point_r/point_u/plane_normal 채워짐
             - 실패: success=False, error_code(ErrorCode)/error_message/details 채워짐
               (safe zone 위반 시 error_code=SAFE_ZONE_VIOLATION,
                details={"point", "position"}; depth 실패는 DEPTH_CALCULATION_FAILED /
                DEPTH_OUT_OF_RANGE; 그 외는 MATCH_FAILED)
         """
-        # 경로 설정
-        if target_texture_path is None or target_texture is None:
-            target_texture_path = target_depth_path
-        target_depth_path = target_depth_path or self.config["target_depth_path"]
-        output_dir = output_dir or self.config["output_dir"]
-
-        self.logger.debug(f"Target texture: {target_texture_path}")
-        self.logger.debug(f"Target depth: {target_depth_path}")
-        self.logger.debug(f"Target camera path: {target_camera_path}")
-        self.logger.debug(f"Output directory: {output_dir}")
-
-        # for output path
-        self.target_texture_name = Path(target_texture_path).stem
-        self.target_depth_name = Path(target_depth_path).stem
-        self.output_path = Path(output_dir)
-        if self.config["save_essential"] != "none":
-            self.output_path.mkdir(exist_ok=True)
-
-        if target_camera_path is not None:
-            target_camera_config = load_photoneo_camera_config(target_camera_path)
-            self.camera_target = create_camera_from_yaml_config(target_camera_config)
-
-        result1_3d = None
-        result2_3d = None
-        result3_3d = None
-        plane_normal = None
-
-        # if self.config["result_image_contrast"] > 0:
-        #     target_texture = cv2.convertScaleAbs(
-        #         target_texture, alpha=self.config["result_image_contrast"]
-        #     )
-        if "roi_2d_src" in self.config and self.config["roi_2d_src"] is not None:
-            source_image = apply_roi_mask(source_image, self.config["roi_2d_src"])
-
         try:
+            # 경로 설정 (셋업도 try 안에서 처리 → 실패 시 예외 대신 MatchResult 반환)
+            target_depth_path = target_depth_path or self.config.get("target_depth_path")
+            if target_depth_path is None:
+                raise MatcherError(
+                    ErrorCode.INVALID_PARAM,
+                    "target_depth_path is required (pass as argument or set in config)",
+                )
+            if target_texture_path is None or target_texture is None:
+                target_texture_path = target_depth_path
+            output_dir = output_dir or self.config["output_dir"]
+
+            self.logger.debug(f"Target texture: {target_texture_path}")
+            self.logger.debug(f"Target depth: {target_depth_path}")
+            self.logger.debug(f"Target camera path: {target_camera_path}")
+            self.logger.debug(f"Output directory: {output_dir}")
+
+            # for output path
+            self.target_texture_name = Path(target_texture_path).stem
+            self.target_depth_name = Path(target_depth_path).stem
+            self.output_path = Path(output_dir)
+            if self.config["save_essential"] != "none":
+                self.output_path.mkdir(exist_ok=True)
+
+            if target_camera_path is not None:
+                target_camera_config = load_photoneo_camera_config(target_camera_path)
+                self.camera_target = create_camera_from_yaml_config(target_camera_config)
+
+            result1_3d = None
+            result2_3d = None
+            result3_3d = None
+            plane_normal = None
+
+            if "roi_2d_src" in self.config and self.config["roi_2d_src"] is not None:
+                source_image = apply_roi_mask(source_image, self.config["roi_2d_src"])
+
             if self.config["image_undistortion"]:
                 target_depth = self.camera_target.undistort_image(target_depth)
 
@@ -1258,7 +1276,10 @@ class Matcher:
                 or self.template_param.get("matching_model", {}).get("selected_points")
             )
             if selected_points is None or not selected_points:
-                raise Exception("Selected points are not set")
+                raise MatcherError(
+                    ErrorCode.INVALID_PARAM,
+                    "selected_points not set in template_param",
+                )
             anchor_point1_3d = get_point_by_config(selected_points, "L")
             anchor_point2_3d = get_point_by_config(selected_points, "R")
             anchor_point3_3d = get_point_by_config(selected_points, "U")
@@ -1336,7 +1357,10 @@ class Matcher:
 
                 selected_points = self.template_param.get("selected_points", {})
                 if selected_points is None:
-                    raise Exception("Selected points are not set")
+                    raise MatcherError(
+                        ErrorCode.INVALID_PARAM,
+                        "selected_points not set in template_param",
+                    )
 
                 transform_matrix = result["transformation"]
 
@@ -1552,6 +1576,13 @@ class Matcher:
             # 결과 객체로 변환해 반환한다. (예외를 외부로 던지지 않음)
             self.logger.error(str(e))
             return MatchResult.fail(e.error_code, e.message, e.details)
+        except KeyError as e:
+            # 설정/파라미터 키 누락은 매칭 실패와 구분해 INVALID_PARAM 으로 분류한다.
+            # (어떤 키가 없는지 메시지에 남겨 진단을 돕는다.)
+            self.logger.error(f"Missing required config/parameter key: {e}")
+            return MatchResult.fail(
+                ErrorCode.INVALID_PARAM, f"missing required config/parameter key: {e}"
+            )
         except Exception as e:
             # 예상치 못한 실패(2D/3D 매칭·필터링 등)는 일반 코드(MATCH_FAILED)로
             # 묶어 결과 객체로 반환한다.

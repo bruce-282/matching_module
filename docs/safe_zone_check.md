@@ -30,9 +30,10 @@ safe    = (|p_local.x| ≤ half.x) AND (|p_local.y| ≤ half.y) AND (|p_local.z|
 
 ### 핵심 포인트
 
-- **매칭 transform을 적용하지 않습니다.** Safe zone은 기준 템플릿/월드 좌표
-  (고정 카메라 공간)에 고정된 "유효 영역"이고, 포즈가 이미 적용된 `result_3d`를
-  **있는 그대로** 그 영역과 비교합니다.
+- **매칭(포즈) transform을 다시 적용하지 않습니다.** 포즈는 이미 `result_3d`에
+  반영돼 있으므로, 그 결과를 safe zone과 **비교만** 합니다. 비교가 이루어지는 좌표
+  프레임은 hand-eye 캘리브레이션이 있으면 **로봇 프레임**, 없으면 카메라 프레임입니다
+  (아래 ["로봇 프레임 검사"](#로봇-프레임-검사-구현됨) 참고).
 - **검사 대상은 `L`, `R` 두 포인트뿐입니다.** `U` 포인트는 safe zone이 없어 검사하지
   않습니다.
 - **하위 호환**: `template_param`에 `safe_zones`가 없으면 검사를 건너뜁니다.
@@ -104,7 +105,9 @@ camera_calibration:
 `check_safe_zones` 는 내부적으로 **`core.matchers.errors.MatcherError`**
 (`error_code = ErrorCode.SAFE_ZONE_VIOLATION`) 를 raise 하지만, 이 예외는
 `run_pipeline` 경계에서 잡혀 **실패 `MatchResult` 로 변환**되어 반환됩니다. (예외가
-외부로 새지 않습니다.) **`run_pipeline` 은 어떤 경우에도 예외를 던지지 않습니다.**
+외부로 새지 않습니다.) **매칭·depth·safe zone 등 파이프라인 처리 중의 실패는 모두
+`MatchResult` 로 반환됩니다.** (단, 잘못된 호출 인자·config 로 인한 초기 설정 단계
+오류는 예외가 날 수 있습니다.)
 
 실패 시 `MatchResult` 필드:
 
@@ -113,7 +116,7 @@ camera_calibration:
 | `res.success` | `False` |
 | `res.error_code` | `ErrorCode.SAFE_ZONE_VIOLATION` (사내 표준 `ErrorCode`, num=504) |
 | `res.error_message` | `point {L\|R} [x, y, z] is outside its safe zone` |
-| `res.code` | 숫자 코드 `MMMSEEE` (예: `30504` — MMM=000, S=3, EEE=504) — crp_core 응답/로깅용 |
+| `res.code` | 숫자 코드 `MMMSEEE` (예: `30504` — MMM=000, S=3, EEE=504) — 로깅/응답용 |
 | `res.details` | `{"point": "L"\|"R", "position": [x, y, z]}` (벗어난 포인트와 좌표) |
 
 > 사내 표준 예외가 필요하면 `res.to_error()` 로 `MatchingError` 를 얻을 수 있습니다.
