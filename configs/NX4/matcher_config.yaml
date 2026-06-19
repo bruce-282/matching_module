@@ -1,0 +1,66 @@
+
+matcher:
+  # 매칭 파라미터 (와이드 이미지용 조정)
+  max_keypoints: 3000
+
+  geometry_type: "Homography"
+  ransac_method: "CV2_USAC_MAGSAC"
+  ransac_reproj_threshold: 13.0  
+  ransac_max_iter: 20000
+  ransac_confidence: 0.9999
+  debug_mode: false
+
+  save_essential: "2d"  # all, 2d, 3d, none
+
+  depth_max: 2500.0
+
+  enable_3d_matching: true
+
+  stable_depth_range: 50.0 # +-50.0mm
+  
+  depth_correction:
+    enabled: false
+    min_depth_diff: 5.0
+    max_xy_diff: 20.0
+
+  pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
+
+  result_image_contrast: 5.0
+  # 3D RANSAC 파라미터
+  # max_correspondence_distance: depth 정밀도 노이즈를 감안해 0.8 -> 3.0mm 로 완화.
+  #   0.8mm 는 너무 빡빡해 inlier 가 한쪽으로 쏠리고(평평한 영역만 생존) ~56% 수준이었으나,
+  #   3.0mm 에서 ~96% 로 고루 분포하며 pose 회전은 0.01~0.03° 로 안정 유지된다.
+  ransac_3d:
+    max_correspondence_distance: 3.0
+    ransac_n: 7
+    max_iterations: 2600
+    confidence: 0.9999
+
+  point_radius: 25
+
+  camera_intrinsics:
+    fx: 2320.1113393328706
+    fy: 2320.3249669909296
+    cx: 1020.9667575368462
+    cy: 721.5296868755295
+  camera_distortions:
+    k1: -0.23691571827746347
+    k2: 0.18485668869694924
+    p1: 0.0006974096202867402
+    p2: -0.0008940189418357964
+    k3: -0.11234667492280082
+
+  image_size:
+    width: 2064
+    height: 1544
+
+  camera_calibration: [[-0.837413760161382, 0.5378965419296572, 0.09698198014317819,
+      1837.131417220074], [-0.3272940313623728, -0.3513913556545883, -0.8771560478077985,
+      177.9838240236977], [-0.43774057537192235, -0.7662841674935921, 0.47031028409095144,
+      2297.800906280515], [0.0, 0.0, 0.0, 1.0]]
+
+  roi_2d_src: [800, 100, 2064, 1400] # [x1, y1, x2, y2]
+
+  image_undistortion: false
+
+

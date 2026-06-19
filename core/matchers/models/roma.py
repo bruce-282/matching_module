@@ -1,4 +1,5 @@
 import sys
+import shutil
 from pathlib import Path
 
 import torch
@@ -39,38 +40,43 @@ class Roma(BaseModel):
         logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger(__name__)
 
-        # 로컬 모델 파일 경로 확인
-        local_model_path = (
-            Path(__file__).parent.parent.parent
-            / "third_party/RoMa/weights"
-            / self.conf["model_name"]
+        # 가중치 영구 경로(레포 내). HF 캐시(~/.cache/huggingface)는 지워질 수 있어,
+        # 다운로드한 파일은 여기로 복사해 보존한다 → 다음 실행부터 캐시와 무관하게 사용.
+        weights_dir = (
+            Path(__file__).parent.parent.parent / "third_party/RoMa/weights"
         )
-        local_dinov2_path = (
-            Path(__file__).parent.parent.parent
-            / "third_party/RoMa/weights"
-            / self.conf["model_utils_name"]
+        local_model_path = weights_dir / self.conf["model_name"]
+        local_dinov2_path = weights_dir / self.conf["model_utils_name"]
+
+        def _resolve_weight(local_path: Path, filename: str) -> str:
+            """로컬 영구 파일이 있으면 그걸 쓰고, 없으면 HF 에서 받아 로컬로 복사해 보존."""
+            if local_path.exists():
+                logger.info(f"Local weight used: {local_path}")
+                return str(local_path)
+            logger.info(f"Local weight not found, downloading from HF: {filename}")
+            downloaded = self._download_model(
+                repo_id=MODEL_REPO_ID, filename=filename
+            )
+            try:
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(downloaded, local_path)
+                logger.info(
+                    f"Weight persisted to repo (cache-independent): {local_path}"
+                )
+                return str(local_path)
+            except OSError as e:
+                # 복사 실패 시에도 동작하도록 캐시 경로를 그대로 사용(이번 실행 한정).
+                logger.warning(f"Failed to persist weight to {local_path}: {e}")
+                return downloaded
+
+        model_path = _resolve_weight(
+            local_model_path,
+            "{}/{}".format(Path(__file__).stem, self.conf["model_name"]),
         )
-
-        # 로컬 파일이 있으면 사용, 없으면 다운로드
-        if local_model_path.exists():
-            logger.info(f"Local model file used: {local_model_path}")
-            model_path = str(local_model_path)
-        else:
-            model_path = self._download_model(
-                repo_id=MODEL_REPO_ID,
-                filename="{}/{}".format(Path(__file__).stem, self.conf["model_name"]),
-            )
-
-        if local_dinov2_path.exists():
-            logger.info(f"Local DINOv2 file used: {local_dinov2_path}")
-            dinov2_weights = str(local_dinov2_path)
-        else:
-            dinov2_weights = self._download_model(
-                repo_id=MODEL_REPO_ID,
-                filename="{}/{}".format(
-                    Path(__file__).stem, self.conf["model_utils_name"]
-                ),
-            )
+        dinov2_weights = _resolve_weight(
+            local_dinov2_path,
+            "{}/{}".format(Path(__file__).stem, self.conf["model_utils_name"]),
+        )
         logger.debug("Loading Roma model")
         # load the model
         weights = torch.load(model_path, map_location="cpu")

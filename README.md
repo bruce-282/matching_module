@@ -28,6 +28,16 @@ pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https
 pip install -r requirements.txt
 ```
 
+### 5. (선택) 디버그 시각화 의존성 — rerun
+safe zone 결과를 3D 로 확인하는 rerun 뷰어는 운영엔 불필요해서 optional extra 로 분리되어 있습니다.
+```bash
+pip install -e .[viz]      # rerun-sdk 설치 (uv 사용 시: uv sync --extra viz)
+```
+
+> **모델 가중치 보존**: RoMa 가중치(`minima_roma.pth`, `dinov2_vitl14_pretrain.pth`)는
+> 최초 실행 시 자동 다운로드된 뒤 `third_party/RoMa/weights/` 에 복사되어 영구 보존됩니다.
+> 이후에는 HuggingFace 캐시(`~/.cache/huggingface`)가 지워져도 재다운로드하지 않습니다.
+
 ## 구동 방법
 
 ### 기본 사용법 (YAML 설정 파일 기반)
@@ -210,10 +220,25 @@ camera_calibration: [[-0.837413760161382, 0.5378965419296572, 0.0969819801431781
 ### 기본 출력 (항상 생성)
 - `{source_name}_result.yaml`: 변환된 포인트 위치 정보
 
-### 디버그 모드 출력 (--debug 옵션 사용 시)
+### 디버그 모드 출력 (`save_essential != "none"`)
 - `{source_name}_matches_original.png`: Roma 매칭 결과 시각화
 - `{source_name}_matches_ransac_filtered.png`: RANSAC 필터링 후 결과 시각화
 - `{source_name}_warped_overlapped.png`: 이미지 변환 및 오버레이 결과
+- `{source_name}_result.json`: rerun 디버그 시각화 입력 (anchor·safe_zones·hand-eye
+  캘리브레이션·intrinsic·입력 경로 포함; safe zone 위반 시 위반 정보도 기록)
+- `{source_name}_correspondences_xy.png`: 3D 대응점 정합 품질 플롯 (top-down XY).
+  `save_correspondence_plot: true` (config) 일 때만 생성. pose 를 적용한 source 대응점과
+  target 대응점을 겹쳐 그려 정합이 잘 맞는지 본다 (matplotlib 필요).
+
+### rerun 디버그 시각화
+`save_essential != "none"` 로 생성된 `*_result.json` 으로 3D 뷰어용 `.rrd` 를 만든다
+(`pip install -e .[viz]` 필요). camera/robot 두 프레임 탭에서 anchor·safe zone OBB·위반
+화살표를 확인할 수 있다.
+```bash
+python -m core.utils.rerun_viz <output_dir> --glob        # 디렉터리 내 *_result.json 전부
+python -m core.utils.rerun_viz <stem>_result.json --spawn # 뷰어 즉시 띄움(GUI)
+```
+자세한 내용은 [Safe Zone Check Process](docs/safe_zone_check.md#디버그-시각화-rerun) 참고.
 
 ### 출력 디렉토리 구조
 ```
@@ -294,6 +319,10 @@ transformed_points:
 
 ### 최신 업데이트
 - **Safe Zone 안전장치**: anchor(`L`/`R`)가 유효 영역(OBB)을 벗어나면 매칭 실패로 처리. hand-eye 캘리브레이션(`camera_calibration`)이 주어지면 **로봇 프레임**에서 검사 → [Safe Zone Check Process](docs/safe_zone_check.md)
+- **OBB half 계산 버그 수정**: `safe_zones` 의 `min`/`max` 는 회전된 박스의 월드 대각 꼭짓점이므로, half 를 로컬 프레임으로 **역회전(Rᵀ) 후** 산출하도록 수정(`euler != 0` 인 회전 zone 의 판정 정확도 직결)
+- **rerun 디버그 시각화**: `*_result.json` 으로 camera/robot 프레임 3D 뷰(`.rrd`) 생성 (`core/utils/rerun_viz.py`, optional `[viz]` extra)
+- **모델 가중치 영구 보존**: 최초 다운로드 후 `third_party/RoMa/weights/` 로 복사 → HF 캐시가 지워져도 재다운로드 없음
+- **3D RANSAC 튜닝(NX4)**: `ransac_3d.max_correspondence_distance` 0.8→3.0mm (inlier 분포 개선)
 - **결과 객체 반환**: `run_pipeline`이 예외를 던지지 않고 `MatchResult`(`success` / `point_l·r·u` / `plane_normal` / `error_code` 등)를 반환. 실패는 사내 표준 `ErrorCode`로 구분 → [Error Codes](docs/error_codes.md)
 - **파라미터/파싱 견고화**: 필수 키 누락 시 명확한 에러(예: `camera_intrinsics`)와 `INVALID_PARAM` 분류, depth 실패 진단 로그 보강
 - **설정 파일 기반 구동**: CLI 인자 대신 YAML 설정 파일 사용

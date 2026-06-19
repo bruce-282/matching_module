@@ -153,3 +153,11 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# RoMa model weights — 런타임 다운로드 후 core/third_party/RoMa/weights 에 영구 보존(대용량)
+core/third_party/
+
+# NX4 샘플 데이터 바이너리 — 데이터는 git 밖에서 관리 (datasets/ 와 동일 정책)
+configs/NX4/*.ply
+configs/NX4/*.tif
+configs/NX4/*.png

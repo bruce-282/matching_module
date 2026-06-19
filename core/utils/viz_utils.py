@@ -3,6 +3,7 @@
 """
 
 import cv2
+import logging
 import numpy as np
 from pathlib import Path
 from typing import Tuple, Optional, Dict, List
@@ -212,3 +213,226 @@ def warp_images(
     overlapped_image = overlapped_image.astype(np.uint8)
 
     return overlapped_image, warped_image
+
+
+def visualize_3d_correspondences(
+    ref_corr: np.ndarray,
+    src_corr: np.ndarray,
+    output_path: str,
+    *,
+    max_points: int = 500,
+    line_step: int = 10,
+    projection: str = "xy",
+    title: Optional[str] = None,
+    figsize: Tuple[float, float] = (8, 6),
+    dpi: int = 150,
+    show_both_xy_xz: bool = True,
+    color_by_depth: bool = True,
+    shared_depth_colormap: bool = False,
+    bg_ref: Optional[np.ndarray] = None,
+    bg_src: Optional[np.ndarray] = None,
+    bg_max_points: int = 30000,
+) -> None:
+    """
+    3D correspondence를 2D 평면에 투영해 시각화 (REF=target, SRC=source).
+    Z(depth) 기반 컬러맵으로 모양 파악 용이. XY (top-down) 한 장 출력 (Y 축 반전).
+
+    Args:
+        ref_corr: Target 쪽 대응점 (N, 3)
+        src_corr: Source 쪽 대응점 (N, 3)
+        output_path: 저장 경로 (.png 등)
+        max_points: 스캐터에 쓸 최대 점 수 (초과 시 랜덤 샘플)
+        line_step: 연결선 간격 (step 마다 한 줄). 0 이하면 선 안 그림(점만).
+        projection: "xz" | "xy" | "yz" (show_both_xy_xz=False일 때만 사용)
+        title: 그래프 제목
+        figsize: figure 크기
+        dpi: 저장 해상도
+        show_both_xy_xz: True면 XY (top-down) 한 장 저장 (_xy.png, Y-down 반전)
+        color_by_depth: True면 Z값으로 컬러맵 (모양 파악용)
+        shared_depth_colormap: True면 REF/SRC 모두 viridis (옛 동작). False면 REF=Blues, SRC=Reds로 대비 강화.
+    """
+    # matplotlib import 전에 DEBUG 로그 억제 (data path, CONFIGDIR, CACHEDIR 등)
+    for _name in ("matplotlib", "matplotlib.font_manager", "matplotlib.pyplot"):
+        logging.getLogger(_name).setLevel(logging.WARNING)
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ref_corr = np.asarray(ref_corr)
+    src_corr = np.asarray(src_corr)
+    n = len(ref_corr)
+    if n != len(src_corr):
+        raise ValueError("ref_corr and src_corr must have same length")
+
+    if n == 0:
+        logger.warning("visualize_3d_correspondences: no points, skip")
+        return
+
+    corr_idx = (
+        np.random.choice(n, min(max_points, n), replace=False)
+        if n > max_points
+        else np.arange(n)
+    )
+    # line_step > 0: step 마다 선. line_step <= 0: 선 안 그림 (점만).
+    line_indices = corr_idx[::line_step] if line_step > 0 else np.empty(0, dtype=int)
+
+    # 배경 점군 (옅게) — 대응점이 부품 형체 어디에 분포하는지 맥락 제공.
+    def _bg_sample(arr):
+        if arr is None:
+            return None
+        arr = np.asarray(arr)
+        if len(arr) == 0:
+            return None
+        if len(arr) > bg_max_points:
+            arr = arr[np.linspace(0, len(arr) - 1, bg_max_points).astype(int)]
+        return arr
+    bg_ref_s = _bg_sample(bg_ref)
+    bg_src_s = _bg_sample(bg_src)
+
+    # Z(depth) 기반 컬러
+    if color_by_depth:
+        z_all = np.concatenate([ref_corr[:, 2], src_corr[:, 2]])
+        vmin, vmax = z_all.min(), z_all.max()
+        if vmax - vmin < 1e-6:
+            vmin, vmax = vmin - 1, vmax + 1
+        c_ref = ref_corr[corr_idx, 2]
+        c_src = src_corr[corr_idx, 2]
+        if shared_depth_colormap:
+            cmap_ref = cmap_src = "viridis"
+        else:
+            cmap_ref, cmap_src = "Blues", "Reds"
+    else:
+        c_ref, c_src = "blue", "red"
+        cmap_ref = cmap_src = None
+        vmin = vmax = None
+
+    def draw_projection(ax, xi: int, yi: int, xlabel: str, ylabel: str, proj_name: str):
+        # 배경 점군 (옅게) — 대응점보다 먼저(아래) 그림.
+        if bg_ref_s is not None:
+            ax.scatter(bg_ref_s[:, xi], bg_ref_s[:, yi], c="#7da6d9",
+                       s=1, alpha=0.10, linewidths=0, zorder=0)
+        if bg_src_s is not None:
+            ax.scatter(bg_src_s[:, xi], bg_src_s[:, yi], c="#d98a8a",
+                       s=1, alpha=0.10, linewidths=0, zorder=0)
+        if color_by_depth:
+            ax.scatter(
+                ref_corr[corr_idx, xi],
+                ref_corr[corr_idx, yi],
+                c=c_ref,
+                s=8,
+                alpha=0.85,
+                cmap=cmap_ref,
+                vmin=vmin,
+                vmax=vmax,
+                edgecolors="#001f3f",
+                linewidths=0.25,
+                label="REF (target)",
+            )
+            ax.scatter(
+                src_corr[corr_idx, xi],
+                src_corr[corr_idx, yi],
+                c=c_src,
+                s=8,
+                alpha=0.85,
+                cmap=cmap_src,
+                vmin=vmin,
+                vmax=vmax,
+                edgecolors="#5c0a0a",
+                linewidths=0.25,
+                label="SRC (source)",
+            )
+        else:
+            ax.scatter(
+                ref_corr[corr_idx, xi],
+                ref_corr[corr_idx, yi],
+                c="#0066cc",
+                s=8,
+                alpha=0.85,
+                edgecolors="#003366",
+                linewidths=0.35,
+                label="REF (target)",
+            )
+            ax.scatter(
+                src_corr[corr_idx, xi],
+                src_corr[corr_idx, yi],
+                c="#cc3300",
+                s=8,
+                alpha=0.85,
+                edgecolors="#5c0a0a",
+                linewidths=0.35,
+                label="SRC (source)",
+            )
+        for i in line_indices:
+            ax.plot(
+                [ref_corr[i, xi], src_corr[i, xi]],
+                [ref_corr[i, yi], src_corr[i, yi]],
+                color="#2ecc71",
+                alpha=0.18,
+                linewidth=0.55,
+            )
+        ax.set_title(f"{proj_name} ({n:,} pairs)")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.legend(markerscale=2, fontsize=8)
+        ax.set_aspect("equal")
+        ax.grid(True, alpha=0.3)
+        # 카메라 좌표계는 Y-down(아래가 +Y) → matplotlib 에선 위아래 뒤집혀 보임.
+        # Y 축(yi==1)을 반전해 물체를 똑바로 표시.
+        if yi == 1:
+            ax.invert_yaxis()
+
+    if show_both_xy_xz:
+        # XY (top-down) 한 장. Y-down 카메라 좌표라 draw_projection 에서 Y 축 반전.
+        out_path = Path(output_path)
+        base, ext = out_path.parent / out_path.stem, out_path.suffix
+        path = f"{base}_xy{ext}"
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        draw_projection(ax, 0, 1, "X", "Y", "XY (top-down)")
+        if color_by_depth and ax.collections:
+            from matplotlib.cm import ScalarMappable
+            from matplotlib.colors import Normalize
+
+            sm = ScalarMappable(cmap=plt.cm.viridis, norm=Normalize(vmin=vmin, vmax=vmax))
+            sm.set_array([])
+            cbar_lbl = ("Z (depth), viridis (REF & SRC)" if shared_depth_colormap
+                        else "Z (depth, shared scale); REF=Blues, SRC=Reds")
+            fig.colorbar(sm, ax=ax, label=cbar_lbl)
+        fig.tight_layout()
+        fig.savefig(path, dpi=dpi, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"3D correspondence plot saved: {path}")
+        return
+    else:
+        axes = projection.lower()
+        if axes == "xz":
+            xi, yi = 0, 2
+            xlabel, ylabel = "X", "Z"
+        elif axes == "xy":
+            xi, yi = 0, 1
+            xlabel, ylabel = "X", "Y"
+        elif axes == "yz":
+            xi, yi = 1, 2
+            xlabel, ylabel = "Y", "Z"
+        else:
+            raise ValueError('projection must be "xz", "xy", or "yz"')
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        draw_projection(ax, xi, yi, xlabel, ylabel, projection.upper())
+        if color_by_depth and ax.collections:
+            from matplotlib.cm import ScalarMappable
+            from matplotlib.colors import Normalize
+
+            sm = ScalarMappable(
+                cmap=plt.cm.viridis, norm=Normalize(vmin=vmin, vmax=vmax)
+            )
+            sm.set_array([])
+            if shared_depth_colormap:
+                cbar_lbl = "Z (depth), viridis (REF & SRC)"
+            else:
+                cbar_lbl = "Z (depth, shared scale); REF=Blues, SRC=Reds"
+            fig.colorbar(sm, ax=ax, label=cbar_lbl)
+        if title:
+            ax.set_title(title)
+
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    logger.info(f"3D correspondence plot saved: {output_path}")
