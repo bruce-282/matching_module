@@ -20,7 +20,12 @@ def read_requirements():
 optional_dependencies = {
     "teaserpp": [
         f"teaserpp-python @ file://{TEASERPP_PATH}",
-    ]
+    ],
+    # rerun 기반 safe zone 디버그 시각화(core/utils/rerun_viz.py)용.
+    # tifffile/scipy/opencv-python 은 requirements.txt 에 이미 포함되어 rerun-sdk 만 추가.
+    "viz": [
+        "rerun-sdk>=0.20",
+    ],
 }
 
 setup(

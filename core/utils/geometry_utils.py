@@ -576,9 +576,9 @@ def is_point_in_safe_zone(
     3D 포인트가 방향이 있는 큐보이드(safe zone, OBB) 안에 있는지 판정합니다.
 
     큐보이드는 두 대각 꼭짓점(min, max)과 중심점 기준 XYZ Euler 회전으로 정의됩니다.
-        center = (min + max) / 2
-        half   = |max - min| / 2
-        R      = euler_to_rotation_matrix(*euler)
+    (min/max 는 회전된 박스의 월드 대각 꼭짓점이므로 half 는 역회전 후 산출한다 —
+    자세한 내용은 obb_from_min_max_euler 참고.)
+        center, half, R = obb_from_min_max_euler(min, max, euler)
     포인트를 큐보이드 로컬 좌표계로 변환(p_local = R^T @ (point - center)) 한 뒤,
     모든 축에서 |p_local[i]| <= half[i] 이면 내부로 판정합니다.
 
@@ -600,6 +600,13 @@ def obb_from_min_max_euler(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(min, max, euler) 표현의 OBB 를 (center, half, R) 표현으로 변환합니다.
 
+    *** 중요 ***: 프론트엔드(Three.js)가 저장하는 min/max 는 회전이 적용된 박스의
+    **월드 대각 꼭짓점**이지, 로컬 축에 정렬된 값이 아니다. 따라서 half 를
+    ``|max - min| / 2`` 로 곧장 구하면 euler != 0 인 경우 크기가 틀린다(축이 섞여
+    회전각만큼 왜곡됨). min/max 를 먼저 로컬 프레임으로 역회전(Rᵀ)해 축 정렬값으로
+    되돌린 뒤 half 를 산출해야 한다(프론트 복원 로직과 동일). euler == 0 이면
+    Rᵀ = I 라 종전과 동일하다.
+
     Returns:
         center: 큐보이드 중심 [x, y, z]
         half: 각 축 반쪽 크기 [x, y, z]
@@ -609,8 +616,10 @@ def obb_from_min_max_euler(
     zone_max = np.asarray(zone_max, dtype=float)
 
     center = (zone_min + zone_max) / 2.0
-    half = np.abs(zone_max - zone_min) / 2.0
     R = euler_to_rotation_matrix(float(euler[0]), float(euler[1]), float(euler[2]))
+    local_min = R.T @ (zone_min - center)
+    local_max = R.T @ (zone_max - center)
+    half = np.abs(local_max - local_min) / 2.0
     return center, half, R
 
 
@@ -633,6 +642,43 @@ def is_point_in_obb(
 
     p_local = R.T @ (point_3d - center)
     return bool(np.all(np.abs(p_local) <= half))
+
+
+def closest_point_on_obb(
+    point_3d: np.ndarray,
+    center: np.ndarray,
+    half: np.ndarray,
+    R: np.ndarray,
+) -> np.ndarray:
+    """OBB(또는 그 내부) 표면에서 point_3d 에 가장 가까운 점을 반환합니다.
+
+    포인트를 로컬 좌표로 역회전한 뒤 각 축을 [-half, half] 로 clamp 하고, 다시
+    월드(또는 입력) 프레임으로 복원한다. 포인트가 OBB 내부면 입력점이 그대로 반환된다.
+    위반 화살표(표면 최근접점 -> 위반 anchor) 시각화에 쓰인다.
+    """
+    point_3d = np.asarray(point_3d, dtype=float)
+    center = np.asarray(center, dtype=float)
+    half = np.asarray(half, dtype=float)
+    R = np.asarray(R, dtype=float)
+
+    p_local = R.T @ (point_3d - center)
+    clamped = np.clip(p_local, -half, half)
+    return R @ clamped + center
+
+
+def obb_violation_vector(
+    point_3d: np.ndarray,
+    center: np.ndarray,
+    half: np.ndarray,
+    R: np.ndarray,
+) -> Tuple[np.ndarray, float]:
+    """OBB 표면 최근접점에서 point_3d 로 향하는 (벡터, 거리) 를 반환합니다.
+
+    포인트가 OBB 내부면 (영벡터, 0.0). 거리는 mm 단위(입력 좌표 단위와 동일).
+    """
+    closest = closest_point_on_obb(point_3d, center, half, R)
+    vec = np.asarray(point_3d, dtype=float) - closest
+    return vec, float(np.linalg.norm(vec))
 
 
 def transform_safe_zone(

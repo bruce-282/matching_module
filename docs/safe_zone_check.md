@@ -15,18 +15,28 @@ Safe zone check는 **포즈가 적용된 최종 anchor 결과가 미리 정의�
 Safe zone은 각 anchor 포인트(`L`, `R`)마다 정의된 **방향이 있는 큐보이드
 (OBB, Oriented Bounding Box)** 입니다.
 
-- `min`, `max`: 큐보이드의 두 대각 꼭짓점 `[x, y, z]`
+- `min`, `max`: 큐보이드의 두 대각 꼭짓점 `[x, y, z]`. 프론트엔드(Three.js)가
+  저장하는 값은 **회전이 적용된 박스의 월드 대각 꼭짓점**이지, 로컬 축에 정렬된 값이
+  아니다. (아래 half 계산 주의 참고)
 - `euler`: 큐보이드 **중심점 기준 회전** `[rx, ry, rz]` (radian)
 
 판정은 다음과 같이 계산합니다.
 
 ```
-center  = (min + max) / 2          # 큐보이드 중심
-half    = |max - min| / 2          # 각 축 반쪽 크기
-R       = euler_to_rotation_matrix(rx, ry, rz)
-p_local = Rᵀ · (point - center)    # 포인트를 큐보이드 로컬 좌표계로 변환
-safe    = (|p_local.x| ≤ half.x) AND (|p_local.y| ≤ half.y) AND (|p_local.z| ≤ half.z)
+center     = (min + max) / 2                 # 큐보이드 중심
+R          = euler_to_rotation_matrix(rx, ry, rz)
+local_min  = Rᵀ · (min - center)             # min/max 를 로컬 프레임으로 역회전
+local_max  = Rᵀ · (max - center)
+half       = |local_max - local_min| / 2     # 역회전 후 각 축 반쪽 크기
+p_local    = Rᵀ · (point - center)           # 포인트를 큐보이드 로컬 좌표계로 변환
+safe       = (|p_local.x| ≤ half.x) AND (|p_local.y| ≤ half.y) AND (|p_local.z| ≤ half.z)
 ```
+
+> **half 계산 주의 (중요):** `min`/`max` 는 회전된 박스의 월드 대각 꼭짓점이므로
+> `half` 를 `|max - min| / 2` 로 곧장 구하면 `euler != 0` 인 경우 축이 섞여 크기가
+> **틀린다**. 반드시 `min`/`max` 를 로컬 프레임으로 **역회전(Rᵀ)** 한 뒤 half 를
+> 산출해야 한다(위 식, 프론트 복원 로직과 동일). `euler == 0` 이면 `Rᵀ = I` 라 종전
+> `|max - min| / 2` 와 동일하다. 구현: `obb_from_min_max_euler` (`geometry_utils`).
 
 ### 핵심 포인트
 
@@ -226,3 +236,25 @@ flowchart TB
 
 > **로봇 프레임(고정·절대 기준)** 으로 양쪽을 모은 뒤 OBB 내부를 판정하므로, 카메라가
 > 움직여도(→ 재캘리브레이션으로 `camera_calibration` 갱신) 안전영역 검사가 그대로 유효하다.
+
+## 디버그 시각화 (rerun)
+
+safe zone 검사 결과를 3D 로 눈으로 확인하려면 **rerun 기반 디버그 뷰어**를 쓴다.
+파이프라인 동작에는 끼어들지 않고, 실행이 남긴 결과 파일만 가지고 사용자가 직접 돌리는
+도구다(운영엔 불필요한 optional 기능).
+
+- **입력 산출물**: `save_essential != "none"` 이면 파이프라인이 `{stem}_result.json`
+  을 저장한다(anchor·safe_zones·hand-eye 캘리브레이션·intrinsic·입력 경로 포함).
+  safe zone 위반으로 실패한 경우에도 위반 정보를 담아 저장된다.
+- **두 프레임 탭**: `camera frame`(매칭 카메라 기준, anchor·점군만)과
+  `robot frame`(anchor→`T_runtime`, safe_zone→`T_teach` 로 모아 비교). 위반 anchor 는
+  빨강, 위반 화살표(OBB 표면 최근접점→anchor, 거리 라벨)도 표시한다.
+
+```bash
+pip install -e .[viz]                                   # rerun-sdk 설치 (optional)
+python -m core.utils.rerun_viz <output_dir> --glob      # *_result.json -> {stem}.rrd
+python -m core.utils.rerun_viz <stem>_result.json --spawn   # 뷰어 즉시 띄움(GUI)
+```
+
+> 구현: `core/utils/rerun_viz.py`. `.rrd` 는 rerun 뷰어로 연다(WSL 은 Windows rerun 으로
+> 파일 열기). rerun 뷰어 폰트에 한글 글리프가 없어 텍스트는 영문으로만 표기한다.

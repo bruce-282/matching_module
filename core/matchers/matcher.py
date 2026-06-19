@@ -31,7 +31,7 @@ from .error_handler import ErrorCode
 from .results import MatchResult
 from .models.roma import Roma
 from ..utils.image_utils import resize_image, process_depth_map, apply_roi_mask
-from ..utils.viz_utils import visualize_matches, warp_images
+from ..utils.viz_utils import visualize_matches, warp_images, visualize_3d_correspondences
 from ..utils.processing_utils import (
     filter_matches,
     registration_ransac_based_on_correspondence,
@@ -1200,6 +1200,84 @@ class Matcher:
                 )
             self.logger.debug(f"Safe zone check passed for point {name}.")
 
+    def _save_result_json(
+        self,
+        *,
+        anchors: Dict[str, np.ndarray],
+        runtime_calibration: Optional[np.ndarray],
+        ok: bool,
+        failed_at: Optional[str] = None,
+        error_detail: Optional[str] = None,
+        violation: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """rerun 디버그 시각화(core/utils/rerun_viz.py)용 ``{stem}_result.json`` 저장.
+
+        파이프라인 동작에는 영향을 주지 않는 보조 산출물이다(실패해도 무시). anchor 와
+        safe_zone 은 **카메라 프레임** 좌표 그대로 저장하고, hand-eye 캘리브레이션을 함께
+        남겨 뷰어가 로봇 프레임으로 변환·비교할 수 있게 한다.
+
+        Args:
+            anchors: {"L","R","U": [x,y,z]} 현재(매칭) 카메라 프레임 anchor 3D 좌표
+            runtime_calibration: run_pipeline 인자로 받은 현재 카메라 hand-eye(cam->robot)
+            ok: 성공 여부
+            failed_at: 실패 단계 이름(ErrorCode.name 등)
+            error_detail: 실패 상세 메시지
+            violation: safe zone 위반 정보 {"point","position"}
+        """
+        if self.config.get("save_essential", "none") == "none":
+            return None
+        try:
+            import json
+
+            safe_zones = (
+                self.template_param.get("safe_zones")
+                or self.template_param.get("matching_model", {}).get("safe_zones")
+            ) if self.template_param else None
+
+            # teaching: init 시 캐싱한 값 / runtime: 인자 우선, 없으면 config fallback
+            T_teach = self.template_camera_calibration
+            T_runtime = self._parse_camera_calibration(
+                runtime_calibration, source="run_pipeline argument"
+            )
+            if T_runtime is None:
+                T_runtime = self.runtime_camera_calibration
+
+            def _mat(m):
+                return np.asarray(m, dtype=float).tolist() if m is not None else None
+
+            K = None
+            if self.camera_target is not None:
+                K = self.camera_target.get_intrinsic_matrix().tolist()
+
+            result = {
+                "frame_stem": self.target_texture_name,
+                "ok": bool(ok),
+                "failed_at": failed_at,
+                "error_detail": error_detail,
+                "anchors": {
+                    name: (np.asarray(pos, dtype=float).tolist() if pos is not None else None)
+                    for name, pos in anchors.items()
+                },
+                "safe_zones": safe_zones,
+                "safe_zone_violation": violation,
+                "camera_target_K": K,
+                "T_teach_cam_to_base": _mat(T_teach),
+                "T_runtime_cam_to_base": _mat(T_runtime),
+                "inputs": {
+                    "depth": getattr(self, "_last_target_depth_path", None),
+                    "texture": getattr(self, "_last_target_texture_path", None),
+                },
+            }
+
+            out_path = self.output_path / f"{self.target_texture_name}_result.json"
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            self.logger.debug(f"Result json saved: {out_path}")
+            return str(out_path)
+        except Exception as e:
+            self.logger.warning(f"Result json 저장 실패(무시): {e}")
+            return None
+
     def run_pipeline(
         self,
         target_texture: Optional[np.ndarray] = None,
@@ -1253,6 +1331,9 @@ class Matcher:
             # for output path
             self.target_texture_name = Path(target_texture_path).stem
             self.target_depth_name = Path(target_depth_path).stem
+            # rerun 디버그 시각화(result.json)에서 점군 backproject 에 쓸 입력 경로 보관
+            self._last_target_depth_path = target_depth_path
+            self._last_target_texture_path = target_texture_path
             self.output_path = Path(output_dir)
             if self.config["save_essential"] != "none":
                 self.output_path.mkdir(exist_ok=True)
@@ -1557,8 +1638,28 @@ class Matcher:
             # Safe zone 안전장치: 포즈가 적용된 anchor 결과 L, R이 템플릿/월드 좌표에
             # 고정된 safe zone(회전 큐보이드) 안에 있는지 확인하고, 벗어나면(=매칭/포즈
             # 추정이 잘못되어 엉뚱한 위치) 매칭 실패로 처리한다. (depth 계산 실패와 동일)
-            self.check_safe_zones(
-                result1_3d, result2_3d, runtime_calibration=target_camera_extrinsic
+            # 위반 시에도 rerun 디버그용 result.json 을 남긴 뒤 실패를 전파한다.
+            anchors_cam = {"L": result1_3d, "R": result2_3d, "U": result3_3d}
+            try:
+                self.check_safe_zones(
+                    result1_3d, result2_3d, runtime_calibration=target_camera_extrinsic
+                )
+            except MatcherError as e:
+                self._save_result_json(
+                    anchors=anchors_cam,
+                    runtime_calibration=target_camera_extrinsic,
+                    ok=False,
+                    failed_at=e.error_code.name,
+                    error_detail=e.message,
+                    violation=e.details if e.error_code == ErrorCode.SAFE_ZONE_VIOLATION else None,
+                )
+                raise
+
+            # 성공 경로: rerun 디버그용 result.json 저장(파이프라인 동작에는 영향 없음)
+            self._save_result_json(
+                anchors=anchors_cam,
+                runtime_calibration=target_camera_extrinsic,
+                ok=True,
             )
 
             plane_normal = compute_plane_normal(result1_3d, result2_3d, result3_3d)
@@ -1813,6 +1914,35 @@ class Matcher:
             pcd_source_transformed = copy.deepcopy(pcd_source)
 
             pcd_source_transformed.transform(pose)
+
+            # 3D correspondence 디버그 플롯 (옵션). pose 를 적용한 source 대응점과
+            # target 대응점을 같은 프레임에서 겹쳐 그려 정합 품질을 본다. matplotlib
+            # 렌더 비용이 있어 config 플래그(save_correspondence_plot)로 opt-in 한다.
+            if self.config.get("save_correspondence_plot", False) and self.config.get(
+                "save_essential", "none"
+            ) != "none":
+                try:
+                    ref_corr = points_3d_target                       # target 프레임
+                    src_corr = np.asarray(pcd_source_transformed.points)  # pose 적용된 source
+                    # inlier/fitness/rmse 를 max_correspondence_distance 기준으로 산출(제목용).
+                    thr = float(self.config.get("ransac_3d", {}).get(
+                        "max_correspondence_distance", 3.0))
+                    d = np.linalg.norm(src_corr - ref_corr, axis=1)
+                    inl = d < thr
+                    n_inl = int(inl.sum())
+                    rmse = float(d[inl].mean()) if n_inl else float("nan")
+                    fitness = float(inl.mean()) if len(d) else 0.0
+                    corr_path = str(
+                        self.output_path / f"{self.target_texture_name}_correspondences.png"
+                    )
+                    visualize_3d_correspondences(
+                        ref_corr, src_corr, corr_path,
+                        max_points=len(ref_corr), line_step=0,   # 전부, 선 없음
+                        title=(f"3D correspondences ({n_inl} inliers, "
+                               f"rmse={rmse:.2f}mm fitness={fitness:.2f})"),
+                    )
+                except Exception as e:
+                    self.logger.warning(f"correspondence plot 저장 실패(무시): {e}")
 
             # 8. 결과 반환
             return {

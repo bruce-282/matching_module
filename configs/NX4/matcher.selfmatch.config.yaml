@@ -1,0 +1,75 @@
+# NX4 self-match config — 이 레포 run_matcher.py 의 flat 스키마.
+#
+# datasets/NX4_selfmatch 의 hood.6 자기매칭(source=target)용. target/source 카메라
+# intrinsic 을 NX4(cx≈1021)로 맞춰야 self-match pose 가 identity 에 수렴한다
+# (Tucson cx≈989 를 쓰면 ~1° 회전 + 평행이동이 생겨 먼 anchor 에서 증폭됨).
+#
+# 실행:  bash scripts/run_nx4_selfmatch.sh
+input_dir: "datasets/NX4_selfmatch/"
+output_dir: "datasets/NX4_selfmatch/output"
+
+max_keypoints: 5000
+
+geometry_type: "Homography"
+ransac_method: "CV2_USAC_MAGSAC"
+ransac_reproj_threshold: 13.0
+ransac_max_iter: 30000
+ransac_confidence: 0.9999
+debug_mode: true
+
+# result.json / 매칭 시각화를 남기려면 none 이 아니어야 한다 (rerun viz 의 입력).
+save_essential: "2d"  # all, 2d, 3d, none
+
+depth_max: 2500.0
+
+enable_3d_matching: true
+
+stable_depth_range: 50.0  # +-50.0mm
+
+pose_estimation_method: "ransac"  # "svd" 또는 "ransac"
+
+# 3D correspondence 디버그 플롯 저장 (matplotlib, save_essential != none 일 때)
+save_correspondence_plot: true
+
+result_image_contrast: 5.0
+
+depth_correction:
+  enabled: true
+  min_depth_diff: 5.0
+  max_xy_diff: 15.0
+
+# 3D RANSAC 파라미터 (depth 정밀도 여유 — 0.8(inlier~56%)→3.0mm(~96%, 고루 분포))
+ransac_3d:
+  max_correspondence_distance: 3.0
+  ransac_n: 7
+  max_iterations: 3500
+  confidence: 0.9999
+
+point_radius: 25
+
+# target/source 카메라 (NX4 hood.6)
+camera_intrinsics:
+  fx: 2320.1113393328706
+  fy: 2320.3249669909296
+  cx: 1020.9667575368462
+  cy: 721.5296868755295
+camera_distortions:
+  k1: -0.23691571827746347
+  k2: 0.18485668869694924
+  p1: 0.0006974096202867402
+  p2: -0.0008940189418357964
+  k3: -0.11234667492280082
+image_size:
+  width: 2064
+  height: 1544
+
+roi_2d_src: [700, 100, 2064, 1200]  # [x1, y1, x2, y2]
+
+image_undistortion: false
+
+# 현재(runtime/매칭) 카메라 hand-eye (cam -> robot base, 4x4).
+# self-match 라 teaching(template) 캘리브레이션과 동일하다.
+camera_calibration: [[-0.837413760161382, 0.5378965419296572, 0.09698198014317819,
+      1837.131417220074], [-0.3272940313623728, -0.3513913556545883, -0.8771560478077985,
+      177.9838240236977], [-0.43774057537192235, -0.7662841674935921, 0.47031028409095144,
+      2297.800906280515], [0.0, 0.0, 0.0, 1.0]]
