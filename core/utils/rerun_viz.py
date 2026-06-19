@@ -58,6 +58,9 @@ _ANCHOR_COLORS = {"L": (60, 160, 255), "R": (255, 180, 60), "U": (180, 120, 255)
 _OK_COLOR = (60, 200, 90)       # 통과 OBB / anchor
 _NG_COLOR = (230, 50, 50)       # 위반 OBB / anchor
 _ANCHOR_RADIUS = 14.0           # anchor 구 반경 (mm) — 전부 통일
+_AXIS_LEN = 300.0               # 원점·카메라 마커 축 길이 (mm) — 씬 스케일(로봇 베이스 ~m)
+                                #   에 맞춰 길게. 너무 짧으면 라벨 글씨에 묻힌다.
+_ZONE_AXIS_LEN = 100.0          # safe zone OBB 로컬 축 길이 (mm) — 박스 크기(half ~80) 수준
 
 
 def _zone_to_obb(zone: Dict[str, Any]):
@@ -253,7 +256,7 @@ def _log_camera_markers(rr, prefix, T_teach, T_runtime):
     origin 축과 동일하게 XYZ(R/G/B) 화살표로 그려 카메라 방향까지 한눈에.
     위치 점은 어느 카메라인지 색 구분(teach=청록, runtime=주황). self-match 면 겹친다.
     """
-    L = 100.0
+    L = _AXIS_LEN
     specs = [("teach", T_teach, (0, 200, 255)), ("runtime", T_runtime, (255, 120, 0))]
     for name, T, color in specs:
         if T is None:
@@ -331,8 +334,8 @@ def _send_tabbed_blueprint(rr, pts, T_cam_to_base, have_robot):
 
 
 def _log_axes(rr, path: str, prefix: str = ""):
-    """원점 + XYZ 축 화살표 (X=빨강, Y=초록, Z=파랑, 100mm). 두 프레임 동일하게."""
-    L = 100.0
+    """원점 + XYZ 축 화살표 (X=빨강, Y=초록, Z=파랑). 두 프레임 동일하게."""
+    L = _AXIS_LEN
     p = (prefix + " ") if prefix else ""
     rr.log(path, rr.Arrows3D(
         origins=[[0, 0, 0]] * 3,
@@ -410,8 +413,12 @@ def _log_frame(rr, prefix, anchors, safe_zones, bad_point, violation,
         # mat3x3 으로 주고 박스는 로컬 축정렬(center 원점)로 그리면 회전이 정상 적용되고
         # 경고도 사라진다. 같은 엔티티에 Transform3D + Boxes3D 를 함께 로깅.
         path = f"{prefix}/safe_zone/{name}"
+        # rerun 은 Transform3D 가 있는 엔티티마다 좌표축 기즈모를 표시한다(zone 방향
+        # 파악에 유용). 기본 axis_length 는 씬 크기 기준이라 과하게 길어지므로, 박스
+        # 크기 수준(_ZONE_AXIS_LEN)으로 맞춰 OBB 에 비례하게 보이도록 한다.
         rr.log(path, rr.Transform3D(translation=np.asarray(center).tolist(),
-                                    mat3x3=np.asarray(R).tolist()), static=True)
+                                    mat3x3=np.asarray(R).tolist(),
+                                    axis_length=_ZONE_AXIS_LEN), static=True)
         rr.log(path, rr.Boxes3D(centers=[[0.0, 0.0, 0.0]],
                                 half_sizes=[np.asarray(half).tolist()],
                                 colors=[zcolor], labels=[f"safe_zone {name}"],

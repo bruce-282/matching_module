@@ -238,6 +238,12 @@ camera_calibration: [[-0.837413760161382, 0.5378965419296572, 0.0969819801431781
 python -m core.utils.rerun_viz <output_dir> --glob        # 디렉터리 내 *_result.json 전부
 python -m core.utils.rerun_viz <stem>_result.json --spawn # 뷰어 즉시 띄움(GUI)
 ```
+
+> **나중에 재생성 가능**: `.rrd` 는 매칭을 다시 돌릴 필요 없이 **`*_result.json` + 그 안
+> `inputs` 가 가리키는 depth/texture 파일**만 있으면 위 명령으로 언제든 다시 만든다
+> (점군은 depth tif 를 backproject). 그래서 `.rrd` 자체는 보관/커밋하지 않아도 된다.
+> `inputs` 경로가 깨지면 배경 점군만 빠지고 anchor·safe zone·위반 화살표는 그대로 그려진다.
+
 자세한 내용은 [Safe Zone Check Process](docs/safe_zone_check.md#디버그-시각화-rerun) 참고.
 
 ### 출력 디렉토리 구조
