@@ -258,3 +258,6 @@ python -m core.utils.rerun_viz <stem>_result.json --spawn   # 뷰어 즉시 띄�
 
 > 구현: `core/utils/rerun_viz.py`. `.rrd` 는 rerun 뷰어로 연다(WSL 은 Windows rerun 으로
 > 파일 열기). rerun 뷰어 폰트에 한글 글리프가 없어 텍스트는 영문으로만 표기한다.
+
+전체 프로세스(설치·result.json 구조·두 프레임 탭·그리는 요소·재생성·트러블슈팅)는
+전용 문서 [Rerun 디버그 시각화](rerun_visualization.md) 참고.

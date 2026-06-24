@@ -237,14 +237,12 @@ camera_calibration: [[-0.837413760161382, 0.5378965419296572, 0.0969819801431781
 ```bash
 python -m core.utils.rerun_viz <output_dir> --glob        # 디렉터리 내 *_result.json 전부
 python -m core.utils.rerun_viz <stem>_result.json --spawn # 뷰어 즉시 띄움(GUI)
+VIZ=1 bash scripts/shell/run_match.sh                     # 매칭과 함께 .rrd 생성
+bash scripts/shell/view_rerun.sh <stem>.rrd               # web viewer 로 열기
 ```
 
-> **나중에 재생성 가능**: `.rrd` 는 매칭을 다시 돌릴 필요 없이 **`*_result.json` + 그 안
-> `inputs` 가 가리키는 depth/texture 파일**만 있으면 위 명령으로 언제든 다시 만든다
-> (점군은 depth tif 를 backproject). 그래서 `.rrd` 자체는 보관/커밋하지 않아도 된다.
-> `inputs` 경로가 깨지면 배경 점군만 빠지고 anchor·safe zone·위반 화살표는 그대로 그려진다.
-
-자세한 내용은 [Safe Zone Check Process](docs/safe_zone_check.md#디버그-시각화-rerun) 참고.
+> **전체 프로세스**(설치·result.json 구조·두 프레임 탭·그리는 요소·재생성·트러블슈팅)는
+> 전용 문서 **[Rerun 디버그 시각화](docs/rerun_visualization.md)** 에 정리되어 있습니다.
 
 ### 출력 디렉토리 구조
 ```
@@ -341,4 +339,5 @@ transformed_points:
 ## 추가 문서
 
 - [Safe Zone Check Process](docs/safe_zone_check.md): 매칭 결과 anchor가 유효 영역을 벗어날 때 매칭 실패로 처리하는 안전장치 설명
+- [Rerun 디버그 시각화](docs/rerun_visualization.md): result.json 으로 anchor·safe zone·pose 를 3D(.rrd)로 시각화하는 전체 프로세스 (설치·실행·두 프레임 탭·재생성·트러블슈팅)
 - [Error Codes](docs/error_codes.md): 사내 표준 `ErrorCode` 전체 표, `MMMSEEE` 인코딩, `run_pipeline` 반환 코드 및 `MatchResult`/`MatchingError` 설명
