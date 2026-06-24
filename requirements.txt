@@ -1,6 +1,8 @@
-torch
-torchvision
-torchaudio
+# torch / torchvision / torchaudio 는 여기에 두지 않는다.
+# unpinned 로 두면 최신(cu13x) 빌드가 설치돼 드라이버(CUDA 12.8)와 어긋나므로,
+# README "3. PyTorch 설치 (CUDA 지원)" 의 cu128 명령으로 별도 설치할 것:
+#   pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 \
+#     --index-url https://download.pytorch.org/whl/cu128
 numpy==1.26.3
 opencv-python
 Pillow>=8.0.0
