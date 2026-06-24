@@ -1,4 +1,20 @@
-path_match_source: "configs/Tucson/tucson_undistorted.tif"
+path_match_source: "configs/Tucson/tucson.tif"
+
+# source 카메라 (matcher.config.yaml 과 동일 — create_camera_from_yaml_config 용)
+camera_intrinsics:
+  fx: 2344.06988494
+  fy: 2344.40009342502
+  cx: 989.06314625513
+  cy: 807.02989528271
+camera_distortions:
+  k1: -0.24331290305526787
+  k2: 0.13922919417642093
+  p1: 0.0005252878633098153
+  p2: -0.0010237886757940777
+  k3: -0.01443719970450923
+image_size:
+  width: 2064
+  height: 1544
 
 selected_points:
   L:
@@ -14,3 +30,7 @@ selected_points:
     y: 27.128007871219964
     z: 1739.6668626288802
 
+camera_calibration: [[-0.837413760161382, 0.5378965419296572, 0.09698198014317819,
+            1837.131417220074], [-0.3272940313623728, -0.3513913556545883, -0.8771560478077985,
+            177.9838240236977], [-0.43774057537192235, -0.7662841674935921, 0.47031028409095144,
+            2297.800906280515], [0.0, 0.0, 0.0, 1.0]]

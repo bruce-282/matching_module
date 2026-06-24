@@ -8,6 +8,7 @@ from pathlib import Path
 import argparse
 import warnings
 import logging
+import json
 import yaml
 import time
 
@@ -20,6 +21,50 @@ sys.path.insert(0, str(project_root))
 
 from core.matchers.matcher import Matcher
 from core.utils.image_utils import read_image
+from core.utils.io_utils import create_camera_from_yaml_config
+
+
+def load_camera_config_from_intrinsic_json(path):
+    """캡처와 쌍을 이루는 ``*_intrinsic.json`` 에서 카메라 설정 dict 를 만든다.
+
+    데이터셋의 각 depth/texture 캡처에는 동일 stem 의 intrinsic json 이 함께 저장된다
+    (예: ``..._match_depth.tif`` ↔ ``..._match_intrinsic.json``). 그 안의 센서
+    intrinsic_matrix / distortion_coefficients / resolution 로부터 target 카메라
+    파라미터를 매 캡처마다 얻어, config 의 고정값 대신 사용한다.
+
+    형식: {"sensores": {"<sensor>": {"intrinsic_matrix": [9], "distortion_coefficients":
+    [..], "resolution": {"width","height"}}}}. 센서 키는 "scanner" 우선, 없으면 첫 번째.
+
+    Returns:
+        create_camera_from_yaml_config 가 받는 dict
+        (camera_intrinsics / camera_distortions / image_size). 실패 시 None.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        sensors = data.get("sensores") or data.get("sensors") or {}
+        if not sensors:
+            return None
+        s = sensors.get("scanner") or next(iter(sensors.values()))
+        m = s["intrinsic_matrix"]          # [fx,0,cx, 0,fy,cy, 0,0,1]
+        d = s.get("distortion_coefficients", [0, 0, 0, 0, 0])
+        res = s.get("resolution", {})
+        return {
+            "camera_intrinsics": {"fx": m[0], "fy": m[4], "cx": m[2], "cy": m[5]},
+            "camera_distortions": {
+                "k1": d[0] if len(d) > 0 else 0.0,
+                "k2": d[1] if len(d) > 1 else 0.0,
+                "p1": d[2] if len(d) > 2 else 0.0,
+                "p2": d[3] if len(d) > 3 else 0.0,
+                "k3": d[4] if len(d) > 4 else 0.0,
+            },
+            "image_size": {
+                "width": res.get("width", 2064),
+                "height": res.get("height", 1544),
+            },
+        }
+    except (OSError, KeyError, ValueError, IndexError, TypeError):
+        return None
 
 
 def main():
@@ -146,6 +191,23 @@ def main():
         if not os.path.exists(texture_file):
             logger.warning(f"Warning: {texture_file} file not found. Skipping.")
             continue
+
+        # 캡처와 쌍을 이루는 intrinsic json 이 있으면 target 카메라를 거기서 얻는다
+        # (config 의 고정 intrinsic 대신 캡처별 실제값 사용). 없으면 config 값 유지.
+        intrinsic_file = os.path.join(input_dir, f"{base_name}_intrinsic.json")
+        if os.path.exists(intrinsic_file):
+            cam_cfg = load_camera_config_from_intrinsic_json(intrinsic_file)
+            if cam_cfg is not None:
+                matcher.camera_target = create_camera_from_yaml_config(cam_cfg)
+                ci = cam_cfg["camera_intrinsics"]
+                logger.info(
+                    f"Target intrinsics from {os.path.basename(intrinsic_file)} "
+                    f"(fx={ci['fx']:.1f}, cx={ci['cx']:.1f})"
+                )
+            else:
+                logger.warning(
+                    f"Failed to parse {intrinsic_file}; using config camera_intrinsics."
+                )
 
         # 각 쌍에 대해 별도 출력 디렉토리 생성
         output_dir = config.get("output_dir", "output")
