@@ -99,7 +99,12 @@ debug_mode: true                   # 디버그 모드 활성화
 
 # 3D 매칭 설정
 enable_3d_matching: true           # 3D 매칭 활성화
-stable_depth_range: 50.0           # 안정적인 depth 범위 (±mm)
+# 안정적인 depth 범위(±mm). anchor 의 추정 depth 와 depth map 값 차이가 이보다 크면
+# DEPTH_OUT_OF_RANGE 로 실패. 숫자(전체 공통) 또는 방향별 dict 둘 다 허용:
+#   stable_depth_range: 50.0              # 전체 L/R/U 공통
+#   stable_depth_range: {L: 50.0, R: 50.0, U: false}  # 방향별 (false/null = 그 방향 검사 skip)
+# (dict 에 없는 방향은 50mm 기본 적용, scalar false 면 전체 skip)
+stable_depth_range: 50.0
 pose_estimation_method: "ransac"    # 포즈 추정 방법 ("svd" 또는 "ransac")
 
 # 카메라 설정

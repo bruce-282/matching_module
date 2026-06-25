@@ -1057,6 +1057,36 @@ class Matcher:
 
         return None
 
+    # stable depth 검사 기본 임계값(mm). config 미설정/축약 시 사용.
+    DEFAULT_STABLE_DEPTH_RANGE = 50.0
+
+    def _stable_range_for(self, name: str) -> Optional[float]:
+        """anchor ``name``(L/R/U)에 대한 stable depth 임계값(mm)을 반환한다.
+        None 이면 그 방향은 검사를 건너뛴다.
+
+        ``config["stable_depth_range"]`` 는 두 형태를 모두 허용한다:
+          - 숫자        : 전체 anchor 공통 임계값 (기존 동작)
+          - 방향별 dict : ``{L: 50.0, R: 50.0, U: false}`` 처럼 방향마다 지정
+              · 숫자        → 그 방향 임계값
+              · false / null → 그 방향 검사 skip
+              · true        → 기본 임계값(DEFAULT_STABLE_DEPTH_RANGE)으로 검사
+              · dict 에 없는 방향 → 기본 임계값으로 검사
+        scalar 가 false/null 이면 전체 검사 skip.
+        """
+        cfg = self.config.get("stable_depth_range", self.DEFAULT_STABLE_DEPTH_RANGE)
+        if isinstance(cfg, dict):
+            if name not in cfg:
+                return self.DEFAULT_STABLE_DEPTH_RANGE
+            v = cfg[name]
+            if v is None or v is False:
+                return None
+            if v is True:
+                return self.DEFAULT_STABLE_DEPTH_RANGE
+            return float(v)
+        if cfg is None or cfg is False:
+            return None
+        return float(cfg)
+
     def _parse_camera_calibration(
         self, raw, source: str
     ) -> Optional[np.ndarray]:
@@ -1547,12 +1577,17 @@ class Matcher:
                     },
                 ]
 
-                # Depth 안정성 검사 및 보정 적용
-                stable_range = self.config.get("stable_depth_range", 50.0)
+                # Depth 안정성 검사 및 보정 적용 (검사는 방향별 on/off 가능)
                 for anchor in anchor_points:
                     depth_diff = abs(anchor["pos_3d"][2] - anchor["depth"])
 
-                    if depth_diff > stable_range:
+                    stable_range = self._stable_range_for(anchor["name"])
+                    if stable_range is None:
+                        self.logger.debug(
+                            f"Stable depth check disabled for {anchor['name']} "
+                            f"(diff={depth_diff:.1f}mm)"
+                        )
+                    elif depth_diff > stable_range:
                         raise MatcherError(
                             ErrorCode.DEPTH_OUT_OF_RANGE,
                             f"Out of stable depth range {anchor['name']}: "
@@ -1563,12 +1598,12 @@ class Matcher:
                                 "stable_range": float(stable_range),
                             },
                         )
+                    else:
+                        self.logger.debug(
+                            f"Stable depth {anchor['name']}: diff={depth_diff:.1f}mm <= {stable_range}mm"
+                        )
 
-                    self.logger.debug(
-                        f"Stable depth {anchor['name']}: diff={depth_diff:.1f}mm <= {stable_range}mm"
-                    )
-
-                    # Depth 보정 적용
+                    # Depth 보정 적용 (stable 검사 skip 여부와 무관)
                     depth_correction = self.config.get("depth_correction", {})
                     if depth_correction and depth_correction.get("enabled", True):
                         corrected = self._apply_depth_correction(
