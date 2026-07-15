@@ -37,7 +37,12 @@ from ..utils.processing_utils import (
     registration_ransac_based_on_correspondence,
     solve_rigid_transform_between_points,
 )
-from ..utils.io_utils import save_points_to_yaml, create_camera_from_yaml_config, load_photoneo_camera_config
+from ..utils.io_utils import (
+    save_points_to_yaml,
+    create_camera_from_yaml_config,
+    load_photoneo_camera_config,
+    create_camera_from_intrinsic_key,
+)
 from ..utils.pcd_utils import (
     create_point_cloud_from_depth_image,
     add_normal_line_to_pcd,
@@ -56,7 +61,6 @@ from ..utils.geometry_utils import (
     project_open3d_pcd_to_image,
     project_3d_point_to_2d,
     create_transform_matrix_from_vectors,
-    is_point_in_safe_zone,
     is_point_in_obb,
     transform_safe_zone,
     as_4x4_matrix,
@@ -215,26 +219,25 @@ class Matcher:
             self.logger.info(f"Template Parameters: {self.template_param}")
 
 
+        # source(teaching) 카메라 — template_param 의 path_template_intrinsic(json) 에서만.
+        # 인라인 fallback 없음 (stale 값 오사용 방지).
         if self.template_param:
             try:
-                self.camera_source = create_camera_from_yaml_config(self.template_param)
-                self.logger.info("Camera source template created from YAML configuration")
+                self.camera_source = create_camera_from_intrinsic_key(
+                    self.template_param, "path_template_intrinsic"
+                )
+                self.logger.info("Camera source template created from path_template_intrinsic (json)")
             except Exception as e:
-                self.logger.error(f"YAML camera source template configuration load failed: {e}")
+                self.logger.error(f"Camera source template configuration load failed: {e}")
                 raise e
         else:
-            self.logger.error(
-                "Camera source template YAML 설정에 camera_intrinsics 또는 camera_distortions가 없습니다."
-            )
+            self.logger.error("template_param 이 없습니다 (path_template_intrinsic 필요).")
             raise ValueError("Camera source configuration file not found")
 
-
-        try:
-            self.camera_target = create_camera_from_yaml_config(self.config)
-            self.logger.info("Camera target created from YAML configuration")
-        except Exception as e:
-            self.logger.error(f"YAML camera target configuration load failed: {e}")
-            raise e
+        # target(runtime) 카메라 — 매 매칭마다 run_pipeline(target_camera_intrinsic=<json>) 로
+        # 명시적으로 전달한다 (tail 의 req_match.path_intrinsic 과 동일). config/인라인/자동
+        # 탐지 모두 사용하지 않음 — 캡처마다 카메라가 다를 수 있으므로 init 시점엔 미정.
+        self.camera_target = None
 
         # 템플릿(teaching) 카메라 hand-eye 캘리브레이션 (teaching cam -> robot, 4x4).
         # template_param 에 정의되며, intrinsic 처럼 init 시 한 번만 파싱해 캐싱한다.
@@ -247,12 +250,10 @@ class Matcher:
             raw_teach, source="template"
         )
 
-        # 현재(runtime/매칭) 카메라 hand-eye 캘리브레이션 fallback (current cam -> robot, 4x4).
-        # 매칭용은 원칙적으로 run_pipeline 의 target_camera_extrinsic 인자로 받지만,
-        # config 에 있으면 인자 미전달 시 fallback 으로 쓴다. (선택값)
-        self.runtime_camera_calibration = self._parse_camera_calibration(
-            self.config.get("camera_calibration"), source="runtime config"
-        )
+        # 현재(runtime/매칭) 카메라 hand-eye 캘리브레이션은 매 매칭마다 run_pipeline 의
+        # target_camera_extrinsic 인자로만 받는다. config `camera_calibration` fallback 제거
+        # (stale 값으로 safe zone 을 엉뚱한 로봇 좌표에서 검사하는 사고 방지).
+        self.runtime_camera_calibration = None
 
 
     def scale_keypoints(self, kpts: torch.Tensor, scale: np.ndarray) -> torch.Tensor:
@@ -1112,33 +1113,23 @@ class Matcher:
 
     def _safe_zone_calibrations(self, runtime_calibration=None):
         """safe zone 을 로봇 프레임에서 검사하기 위한 (T_teach, T_runtime) 4x4 쌍을
-        반환한다. 둘 다 있을 때만 쌍을 반환하고, 하나라도 없으면 None 을 반환해
-        카메라 프레임에서 직접 비교한다(하위 호환).
+        반환한다. 하나라도 없으면 None 을 반환한다 (호출부에서 에러 처리).
 
         - T_teach   : 템플릿(teaching) 카메라 -> 로봇. **template_param** 에서 파싱.
                       safe_zones(템플릿 프레임)를 로봇 프레임으로 변환하는 데 사용.
         - T_runtime : 현재(매칭) 카메라 -> 로봇. **run_pipeline 의 target_camera_extrinsic
-                      인자**(runtime_calibration)로 전달(우선). 없으면 모듈 config 의
-                      camera_calibration(self.runtime_camera_calibration)로 fallback.
+                      인자**(runtime_calibration)로만 전달. config fallback 없음.
                       result_3d(현재 카메라 프레임)를 로봇 프레임으로 변환하는 데 사용.
         """
         # teaching(template) 캘리브레이션: init 시 1회 파싱해 캐싱한 값 사용
         T_teach = self.template_camera_calibration
 
-        # 매칭(runtime) 캘리브레이션: run_pipeline 인자 우선, 없으면 config fallback
+        # 매칭(runtime) 캘리브레이션: run_pipeline 인자에서만 (config fallback 제거)
         T_runtime = self._parse_camera_calibration(
             runtime_calibration, source="run_pipeline argument"
         )
-        if T_runtime is None:
-            T_runtime = self.runtime_camera_calibration
 
-        if T_teach is None and T_runtime is None:
-            return None  # 캘리브레이션 미제공 -> 기존 동작(카메라 프레임 직접 비교)
         if T_teach is None or T_runtime is None:
-            self.logger.warning(
-                "camera_calibration 이 한쪽(teaching/runtime)만 설정됨 - 로봇 프레임 "
-                "변환을 건너뛰고 카메라 프레임에서 직접 비교합니다."
-            )
             return None
 
         return T_teach, T_runtime
@@ -1190,10 +1181,18 @@ class Matcher:
             self.logger.debug("No safe_zones configured - skipping safe zone check.")
             return
 
-        # 로봇 프레임 검사용 캘리브레이션 쌍 (둘 다 있을 때만, 아니면 None=직접 비교)
+        # safe_zones 를 쓰려면 로봇 프레임 캘리브레이션(teaching+runtime)이 필수다.
+        # 하나라도 없으면 카메라 프레임 직접 비교로 조용히 넘어가지 않고 에러를 낸다
+        # (카메라 이동/재배치 상황에서 잘못된 통과를 막기 위함).
         calibrations = self._safe_zone_calibrations(runtime_calibration)
-        if calibrations is not None:
-            self.logger.debug("Safe zone check in robot frame (hand-eye calibration applied).")
+        if calibrations is None:
+            raise MatcherError(
+                ErrorCode.INVALID_PARAM,
+                "safe_zones 검사에는 teaching(template) + runtime(run_pipeline "
+                "target_camera_extrinsic) camera_calibration 이 모두 필요합니다 "
+                "(config fallback / 카메라 프레임 비교 제거).",
+            )
+        self.logger.debug("Safe zone check in robot frame (hand-eye calibration applied).")
 
         # L, R 두 포인트만 각자의 safe zone에 대해 검사 (U는 검사 제외)
         for name, point_3d in (("L", result1_3d), ("R", result2_3d)):
@@ -1206,19 +1205,15 @@ class Matcher:
             zone_max = np.array(zone["max"], dtype=float)
             euler = np.array(zone["euler"], dtype=float)
 
-            if calibrations is None:
-                # 캘리브레이션 미제공: 카메라 프레임에서 직접 비교 (하위 호환)
-                inside = is_point_in_safe_zone(point_3d, zone_min, zone_max, euler)
-            else:
-                # 다이어그램 그대로: 양쪽을 로봇 프레임으로 모은 뒤 OBB 내부 판정
-                #  - result_3d(현재 카메라 프레임) -> 로봇:  T_runtime
-                #  - safe_zone(템플릿 카메라 프레임) -> 로봇: T_teach
-                T_teach, T_runtime = calibrations
-                point_robot = transform_point_3d(point_3d, T_runtime)
-                center_r, half_r, R_r = transform_safe_zone(
-                    zone_min, zone_max, euler, T_teach
-                )
-                inside = is_point_in_obb(point_robot, center_r, half_r, R_r)
+            # 양쪽을 로봇 프레임으로 모은 뒤 OBB 내부 판정
+            #  - result_3d(현재 카메라 프레임) -> 로봇:  T_runtime
+            #  - safe_zone(템플릿 카메라 프레임) -> 로봇: T_teach
+            T_teach, T_runtime = calibrations
+            point_robot = transform_point_3d(point_3d, T_runtime)
+            center_r, half_r, R_r = transform_safe_zone(
+                zone_min, zone_max, euler, T_teach
+            )
+            inside = is_point_in_obb(point_robot, center_r, half_r, R_r)
 
             if not inside:
                 # 리포트 좌표는 원본(현재 카메라 프레임) result_3d 를 그대로 사용
@@ -1264,13 +1259,11 @@ class Matcher:
                 or self.template_param.get("matching_model", {}).get("safe_zones")
             ) if self.template_param else None
 
-            # teaching: init 시 캐싱한 값 / runtime: 인자 우선, 없으면 config fallback
+            # teaching: init 시 캐싱한 값 / runtime: run_pipeline 인자에서만 (config fallback 없음)
             T_teach = self.template_camera_calibration
             T_runtime = self._parse_camera_calibration(
                 runtime_calibration, source="run_pipeline argument"
             )
-            if T_runtime is None:
-                T_runtime = self.runtime_camera_calibration
 
             def _mat(m):
                 return np.asarray(m, dtype=float).tolist() if m is not None else None
@@ -1313,7 +1306,7 @@ class Matcher:
         target_texture: Optional[np.ndarray] = None,
         target_depth: Optional[np.ndarray] = None,
         source_image: Optional[np.ndarray] = None,
-        target_camera_path: Optional[str] = None,
+        target_camera_intrinsic: Optional[str] = None,
         target_texture_path: Optional[str] = None,
         target_depth_path: Optional[str] = None,
         target_camera_extrinsic: Optional[np.ndarray] = None,
@@ -1327,7 +1320,9 @@ class Matcher:
             target_texture: Target texture 이미지 (매칭용) 
             target_depth: Target depth 이미지 (depth 계산용) 
             source_image: Source 이미지
-            target_camera_path: Target camera parameter 경로
+            target_camera_intrinsic: target 카메라 intrinsic **json 경로**(`sensores.scanner`).
+                매 매칭마다 필수 (없으면 에러, fallback 없음). `target_camera_extrinsic` 과
+                이름 대칭 (intrinsic=json 경로, extrinsic=4x4 행렬).
             target_texture_path: Target texture 이미지 경로 (debug mode 사용 시 사용)
             target_depth_path: Target depth 이미지 경로 (debug mode 사용 시 사용)
             output_dir: 출력 디렉토리
@@ -1355,7 +1350,7 @@ class Matcher:
 
             self.logger.debug(f"Target texture: {target_texture_path}")
             self.logger.debug(f"Target depth: {target_depth_path}")
-            self.logger.debug(f"Target camera path: {target_camera_path}")
+            self.logger.debug(f"Target camera path: {target_camera_intrinsic}")
             self.logger.debug(f"Output directory: {output_dir}")
 
             # for output path
@@ -1368,9 +1363,16 @@ class Matcher:
             if self.config["save_essential"] != "none":
                 self.output_path.mkdir(exist_ok=True)
 
-            if target_camera_path is not None:
-                target_camera_config = load_photoneo_camera_config(target_camera_path)
-                self.camera_target = create_camera_from_yaml_config(target_camera_config)
+            # target 카메라 intrinsic 은 매 호출마다 target_camera_intrinsic(json)로 필수 전달.
+            # config/인라인/자동탐지 fallback 없음 (stale 값 오사용 방지) → 없으면 에러.
+            if target_camera_intrinsic is None:
+                raise MatcherError(
+                    ErrorCode.INVALID_PARAM,
+                    "target_camera_intrinsic (target camera intrinsic json) is required — "
+                    "매 매칭마다 캡처의 intrinsic json 경로를 전달하세요 (fallback 없음)",
+                )
+            target_camera_config = load_photoneo_camera_config(target_camera_intrinsic)
+            self.camera_target = create_camera_from_yaml_config(target_camera_config)
 
             result1_3d = None
             result2_3d = None

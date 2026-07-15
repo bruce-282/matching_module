@@ -329,6 +329,49 @@ def load_photoneo_camera_config(config_path: str) -> Dict[str, Any]:
         raise Exception(f"Photoneo camera configuration load error: {e}")
 
 
+def resolve_intrinsic_path(cfg: Dict[str, Any], path_key: str) -> Optional[str]:
+    """cfg 최상위 또는 ``matching_model`` 하위에서 intrinsic json 경로(path_key)를 찾는다.
+
+    teaching yaml 은 ``matching_model:`` 로 래핑된 스키마와 평탄 스키마 둘 다 존재하므로
+    양쪽을 모두 확인한다. 없으면 None.
+    """
+    if not isinstance(cfg, dict):
+        return None
+    return cfg.get(path_key) or (cfg.get("matching_model") or {}).get(path_key)
+
+
+def create_camera_from_intrinsic_key(cfg: Dict[str, Any], path_key: str):
+    """카메라를 **intrinsic json 경로(key)에서만** 생성한다. 인라인 fallback 없음.
+
+    cfg (최상위 또는 ``matching_model`` 하위) 의 ``path_key``
+    (예: ``path_template_intrinsic`` / ``path_intrinsic``) 가 가리키는 intrinsic json
+    (``sensores.scanner``, photoneo) 에서 카메라를 만든다. 캡처마다 함께 오는
+    ``*_intrinsic.json`` 을 경로로 넘기면 fx/cx 를 손으로 채울 필요가 없다.
+
+    **인라인(``camera_intrinsics`` 등) fallback 은 의도적으로 제거했다** — stale 한
+    인라인 값으로 조용히 잘못된 intrinsic 을 쓰는 사고를 막기 위함. 경로가 없으면 즉시
+    ``ValueError`` 로 실패한다.
+
+    Args:
+        cfg: template_param(source) 또는 config(target) dict.
+        path_key: intrinsic json 경로가 담긴 키 이름.
+
+    Returns:
+        Camera 객체.
+
+    Raises:
+        ValueError: ``path_key`` (intrinsic json 경로) 가 없을 때.
+    """
+    intr_path = resolve_intrinsic_path(cfg, path_key)
+    if not intr_path:
+        raise ValueError(
+            f"'{path_key}' (intrinsic json 경로) 가 필요합니다 — 인라인 fallback 은 "
+            f"제거됨. 캡처의 *_intrinsic.json 경로를 지정하세요."
+        )
+    cam_cfg = load_photoneo_camera_config(intr_path)
+    return create_camera_from_yaml_config(cam_cfg)
+
+
 def save_points_to_yaml(
     image_size: Tuple[int, int],
     result_3d_points: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]] = None,

@@ -8,7 +8,6 @@ from pathlib import Path
 import argparse
 import warnings
 import logging
-import json
 import yaml
 import time
 
@@ -21,50 +20,6 @@ sys.path.insert(0, str(project_root))
 
 from core.matchers.matcher import Matcher
 from core.utils.image_utils import read_image
-from core.utils.io_utils import create_camera_from_yaml_config
-
-
-def load_camera_config_from_intrinsic_json(path):
-    """캡처와 쌍을 이루는 ``*_intrinsic.json`` 에서 카메라 설정 dict 를 만든다.
-
-    데이터셋의 각 depth/texture 캡처에는 동일 stem 의 intrinsic json 이 함께 저장된다
-    (예: ``..._match_depth.tif`` ↔ ``..._match_intrinsic.json``). 그 안의 센서
-    intrinsic_matrix / distortion_coefficients / resolution 로부터 target 카메라
-    파라미터를 매 캡처마다 얻어, config 의 고정값 대신 사용한다.
-
-    형식: {"sensores": {"<sensor>": {"intrinsic_matrix": [9], "distortion_coefficients":
-    [..], "resolution": {"width","height"}}}}. 센서 키는 "scanner" 우선, 없으면 첫 번째.
-
-    Returns:
-        create_camera_from_yaml_config 가 받는 dict
-        (camera_intrinsics / camera_distortions / image_size). 실패 시 None.
-    """
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        sensors = data.get("sensores") or data.get("sensors") or {}
-        if not sensors:
-            return None
-        s = sensors.get("scanner") or next(iter(sensors.values()))
-        m = s["intrinsic_matrix"]          # [fx,0,cx, 0,fy,cy, 0,0,1]
-        d = s.get("distortion_coefficients", [0, 0, 0, 0, 0])
-        res = s.get("resolution", {})
-        return {
-            "camera_intrinsics": {"fx": m[0], "fy": m[4], "cx": m[2], "cy": m[5]},
-            "camera_distortions": {
-                "k1": d[0] if len(d) > 0 else 0.0,
-                "k2": d[1] if len(d) > 1 else 0.0,
-                "p1": d[2] if len(d) > 2 else 0.0,
-                "p2": d[3] if len(d) > 3 else 0.0,
-                "k3": d[4] if len(d) > 4 else 0.0,
-            },
-            "image_size": {
-                "width": res.get("width", 2064),
-                "height": res.get("height", 1544),
-            },
-        }
-    except (OSError, KeyError, ValueError, IndexError, TypeError):
-        return None
 
 
 def main():
@@ -82,6 +37,12 @@ def main():
         type=str,
         required=True,
         help="Template parameter file path (YAML)",
+    )
+    parser.add_argument(
+        "--target_camera_intrinsic",
+        type=str,
+        required=True,
+        help="target 카메라 intrinsic json 경로 (sensores.scanner). run_pipeline 에 그대로 전달.",
     )
 
     args = parser.parse_args()
@@ -135,48 +96,31 @@ def main():
         logger.warning(f"Warning: No *_depth.tif files found in {input_dir}")
         return
 
-    # 필수 카메라 설정 검증 (누락 시 명확히 안내하고 종료)
-    camera_intrinsics = config.get("camera_intrinsics")
-    if not isinstance(camera_intrinsics, dict):
-        logger.error("config에 'camera_intrinsics'(fx, fy, cx, cy)가 없습니다.")
-        return
-    missing_keys = [k for k in ("fx", "fy", "cx", "cy") if k not in camera_intrinsics]
-    if missing_keys:
-        logger.error(f"'camera_intrinsics'에 다음 키가 없습니다: {missing_keys}")
-        return
+    # source 이미지 로드 파라미터는 source 카메라에서 가져온다. source 카메라는
+    # init_config 에서 template 의 path_template_intrinsic(json) 또는 인라인으로 이미
+    # 빌드되었고(둘 다 없으면 init_config 가 raise), target 카메라도 config 의
+    # path_intrinsic(json) 또는 인라인으로 빌드된다 — 여기서 config intrinsic 유무를
+    # 따로 검증하지 않는다 (key 방식이면 인라인이 없을 수 있음).
+    src_K = matcher.camera_source.get_intrinsic_matrix()
+    src_w, src_h = matcher.camera_source.image_size
 
-    image_size = config.get("image_size")
-    if not isinstance(image_size, dict) or "width" not in image_size or "height" not in image_size:
-        logger.error("config에 'image_size'(width, height)가 없습니다.")
-        return
-
-    intrinsic_matrix = np.array(
-        [
-            [camera_intrinsics["fx"], 0, camera_intrinsics["cx"]],
-            [0, camera_intrinsics["fy"], camera_intrinsics["cy"]],
-            [0, 0, 1],
-        ]
-    )
-    # path_match_source 찾기: template_param 최상위 -> template_param.matching_model -> config.matching_model
+    # path_match_source 찾기: template_param 최상위 -> template_param.matching_model
     path_match_source = (
         template_param.get("path_match_source")
         or template_param.get("matching_model", {}).get("path_match_source")
     )
-    
     if path_match_source is None:
-        logger.error("path_match_source를 찾을 수 없습니다. template_param 또는 config를 확인하세요.")
+        logger.error("path_match_source를 찾을 수 없습니다. template_param 을 확인하세요.")
         return
-    
+
     source_image = read_image(
         path_match_source,
-        width=image_size["width"],
-        height=image_size["height"],
-        intrinsic_matrix=intrinsic_matrix,
+        width=src_w,
+        height=src_h,
+        intrinsic_matrix=src_K,
     )
     if source_image is None:
-        logger.error(
-            f"Source image not found: {path_match_source}"
-        )
+        logger.error(f"Source image not found: {path_match_source}")
         return
 
     for depth_file in depth_files:
@@ -191,23 +135,6 @@ def main():
         if not os.path.exists(texture_file):
             logger.warning(f"Warning: {texture_file} file not found. Skipping.")
             continue
-
-        # 캡처와 쌍을 이루는 intrinsic json 이 있으면 target 카메라를 거기서 얻는다
-        # (config 의 고정 intrinsic 대신 캡처별 실제값 사용). 없으면 config 값 유지.
-        intrinsic_file = os.path.join(input_dir, f"{base_name}_intrinsic.json")
-        if os.path.exists(intrinsic_file):
-            cam_cfg = load_camera_config_from_intrinsic_json(intrinsic_file)
-            if cam_cfg is not None:
-                matcher.camera_target = create_camera_from_yaml_config(cam_cfg)
-                ci = cam_cfg["camera_intrinsics"]
-                logger.info(
-                    f"Target intrinsics from {os.path.basename(intrinsic_file)} "
-                    f"(fx={ci['fx']:.1f}, cx={ci['cx']:.1f})"
-                )
-            else:
-                logger.warning(
-                    f"Failed to parse {intrinsic_file}; using config camera_intrinsics."
-                )
 
         # 각 쌍에 대해 별도 출력 디렉토리 생성
         output_dir = config.get("output_dir", "output")
@@ -235,6 +162,7 @@ def main():
                 target_texture=target_texture,
                 target_depth=target_depth,
                 source_image=source_image,
+                target_camera_intrinsic=args.target_camera_intrinsic,
                 target_texture_path=texture_file,
                 target_depth_path=depth_file,
                 output_dir=output_dir,

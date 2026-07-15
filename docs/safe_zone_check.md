@@ -42,7 +42,8 @@ safe       = (|p_local.x| ≤ half.x) AND (|p_local.y| ≤ half.y) AND (|p_local
 
 - **매칭(포즈) transform을 다시 적용하지 않습니다.** 포즈는 이미 `result_3d`에
   반영돼 있으므로, 그 결과를 safe zone과 **비교만** 합니다. 비교가 이루어지는 좌표
-  프레임은 hand-eye 캘리브레이션이 있으면 **로봇 프레임**, 없으면 카메라 프레임입니다
+  프레임은 항상 **로봇 프레임**입니다 — teaching + runtime hand-eye 캘리브레이션이
+  모두 필요하며, 하나라도 없으면 (카메라 프레임 비교로 넘어가지 않고) 에러입니다
   (아래 ["로봇 프레임 검사"](#로봇-프레임-검사-구현됨) 참고).
 - **검사 대상은 `L`, `R` 두 포인트뿐입니다.** `U` 포인트는 safe zone이 없어 검사하지
   않습니다.
@@ -77,7 +78,7 @@ safe_zones:
     max: [661.8052, 180.7805, 1770.4976]
     euler: [2.7066, 0.5931, -0.1091]
 
-# (선택) hand-eye 캘리브레이션 — 있으면 로봇 프레임에서 검사한다.
+# hand-eye 캘리브레이션 — safe_zones 를 쓰면 필수 (로봇 프레임에서 검사).
 # 카메라 -> 로봇(base) 변환 (= inv(T_base2cam)). p_robot = camera_calibration @ p_cam.
 # 여기 것은 템플릿(teaching) 카메라 -> 로봇, 4x4 (template_param 에 저장)
 # 형식: 4x4 중첩 리스트 (flow 또는 block 모두 인식)
@@ -88,11 +89,11 @@ camera_calibration: [[-0.83741, 0.53790, 0.09698, 1837.13142],
 ```
 
 현재(매칭/runtime) 카메라 캘리브레이션은 **`run_pipeline(target_camera_extrinsic=...)`
-인자**(동일한 4x4 형식)로 매 호출 전달한다. (인자 미전달 시 모듈 config 의
-`camera_calibration` 으로 fallback.) 반면 **teaching 캘리브레이션은 `template_param`
-에서 `init_config` 시 1회 파싱해 캐싱**한다. teaching/runtime 두 캘리브레이션이 **모두
-있을 때만** 로봇 프레임 검사가 활성화되고, 없으면 카메라 프레임에서 직접 비교한다(하위
-호환). 4x4 는 중첩 리스트 또는 길이 16 시퀀스 모두 인식.
+인자**(동일한 4x4 형식)로 매 호출 전달한다 (config `camera_calibration` fallback 폐기 —
+stale 값 오사용 방지). 반면 **teaching 캘리브레이션은 `template_param` 에서 `init_config`
+시 1회 파싱해 캐싱**한다. `safe_zones` 가 정의된 경우 teaching/runtime 두 캘리브레이션이
+**모두 필요**하며, 하나라도 없으면 (카메라 프레임 비교로 넘어가지 않고) 에러다. 4x4 는
+중첩 리스트 또는 길이 16 시퀀스 모두 인식.
 
 > **방향 주의**: `camera_calibration` 은 **카메라 → 로봇(base)** 변환이다. 즉
 > `T_cam2base = inv(T_base2cam)` 이며, 카메라 좌표 점을 그대로 곱해 로봇 좌표로 보낸다
@@ -177,11 +178,12 @@ safe zone은 결국 "로봇 기준으로 여기 안에 있어야 한다"는 절�
 로봇 좌표로 바꿔서 비교하는 게 가장 자연스럽습니다. 그래서 캘리브레이션이 주어지면 로봇
 프레임에서 검사합니다.
 
-카메라가 움직이면 hand-eye(`camera_calibration`)만 다시 잡아 주면 됩니다. safe zone을
-다시 그리거나 결과에 별도 보정을 넣을 필요 없이, 같은 검사가 그대로 유효합니다.
+카메라가 움직이면 runtime hand-eye(`target_camera_extrinsic`)만 매 매칭에 다시 넣어 주면
+됩니다. safe zone을 다시 그리거나 결과에 별도 보정을 넣을 필요 없이, 같은 검사가 그대로
+유효합니다.
 
-캘리브레이션이 없을 때는(카메라가 고정이라 teaching과 runtime 프레임이 같다고 보고)
-카메라 프레임에서 바로 비교합니다.
+`safe_zones` 를 정의했는데 teaching/runtime 캘리브레이션이 하나라도 없으면 (카메라 프레임
+비교로 조용히 넘어가지 않고) 에러를 냅니다 — 카메라 이동 상황에서 잘못된 통과를 막기 위함.
 
 ## 로봇 프레임 검사 (구현됨)
 
@@ -192,11 +194,11 @@ safe zone 검사를 **로봇 프레임**에서 수행하기 위해, 카메라↔
       `matching_model` 하위)에서 파싱. 템플릿 프레임에 정의된 `safe_zones`를 로봇
       프레임으로 변환하는 데 사용. (`T_teach`)
 - [x] **현재(매칭/runtime) 카메라 캘리브레이션**: 동일한 4x4 형식. **`run_pipeline` 의
-      `target_camera_extrinsic` 인자**로 매 호출 전달(없으면 config fallback). 현재 카메라
+      `target_camera_extrinsic` 인자**로 매 호출 전달 (config fallback 폐기). 현재 카메라
       프레임의 `result_3d`를 로봇 프레임으로 변환하는 데 사용. (`T_runtime`)
 - [x] `check_safe_zones` 가 두 캘리브레이션으로 `result_3d`와 `safe_zones`를 **모두
-      로봇 프레임으로 모아서** OBB 내부를 판정한다. 두 캘리브레이션이 모두 있을 때만
-      활성화되며, 하나라도 없으면 카메라 프레임 직접 비교로 fallback(하위 호환).
+      로봇 프레임으로 모아서** OBB 내부를 판정한다. `safe_zones` 가 있으면 두 캘리브레이션이
+      **모두 필수**이며, 하나라도 없으면 에러(카메라 프레임 fallback 폐기).
 
   ```
   point_robot = T_runtime · result_3d               # 현재 카메라 -> 로봇

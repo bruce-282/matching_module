@@ -45,7 +45,8 @@ pip install -e .[viz]      # rerun-sdk 설치 (uv 사용 시: uv sync --extra vi
 ```bash
 python run_matcher.py \
   --config_path configs/Default/matcher.config.yaml \
-  --template_param_path configs/Default/matcher.teaching.param.yaml
+  --template_param_path configs/Default/matcher.teaching.param.yaml \
+  --target_camera_intrinsic datasets/0910/target_intrinsic.json
 ```
 
 ### 설정 파일 구조
@@ -63,11 +64,13 @@ datasets/
     ├── image1_depth.tif           # Depth 이미지 (3D 계산용)
     ├── image2_texture.png
     ├── image2_depth.tif
+    ├── image1_intrinsic.json      # 각 캡처의 target intrinsic — 매 매칭마다 target_camera_intrinsic 로 전달
+    ├── image2_intrinsic.json
     └── ...
 
 configs/
 └── Default/
-    ├── matcher.config.yaml        # 메인 설정 파일
+    ├── matcher.config.yaml        # 메인 설정 파일 (매칭 옵션 — target intrinsic 은 포함 안 함)
     └── matcher.teaching.param.yaml # 템플릿 파라미터 파일
 ```
 
@@ -76,6 +79,7 @@ configs/
 ### 필수 인자
 - `--config_path`: 설정 파일 경로 (YAML 형식)
 - `--template_param_path`: 템플릿 파라미터 파일 경로 (YAML 형식)
+- `--target_camera_intrinsic`: target 카메라 intrinsic json 경로 (`sensores.scanner`). `run_pipeline(target_camera_intrinsic=)` 로 그대로 전달 (파일명 유추/자동탐지 없음)
 
 ## 설정 파일 설명
 
@@ -107,21 +111,10 @@ enable_3d_matching: true           # 3D 매칭 활성화
 stable_depth_range: 50.0
 pose_estimation_method: "ransac"    # 포즈 추정 방법 ("svd" 또는 "ransac")
 
-# 카메라 설정
-camera_intrinsics:
-  fx: 2344.06988494
-  fy: 2344.40009342502
-  cx: 989.06314625513
-  cy: 807.02989528271
-camera_distortions:
-  k1: -0.24331290305526787
-  k2: 0.13922919417642093
-  p1: 0.0005252878633098153
-  p2: -0.0010237886757940777
-  k3: -0.01443719970450923
-image_size:
-  width: 2064
-  height: 1544
+# 카메라 설정 (target/runtime)
+# target 카메라 intrinsic 은 config 가 아니라 **매 매칭마다** 전달한다:
+#   run_pipeline(target_camera_intrinsic=<캡처의 *_intrinsic.json>) — sensores.scanner.
+#   인라인 camera_intrinsics/... 와 config 경로 지정 모두 폐기 (없으면 즉시 에러).
 image_undistortion: true           # 이미지 왜곡 보정 활성화
 
 # Depth 설정
@@ -137,20 +130,10 @@ depth_max: 2500.0                  # Depth map 최대 값
 path_match_source: "datasets/source_0919.tif"
 
 # 템플릿(소스) 카메라 파라미터 - 소스 카메라(camera_source) 생성에 사용
-camera_intrinsics:
-  fx: 2320.1113393328706
-  fy: 2320.3249669909296
-  cx: 1020.9667575368462
-  cy: 721.5296868755295
-camera_distortions:
-  k1: -0.23691571827746347
-  k2: 0.18485668869694924
-  p1: 0.0006974096202867402
-  p2: -0.0008940189418357964
-  k3: -0.11234667492280082
-image_size:
-  width: 2064
-  height: 1544
+# intrinsic 은 json 경로로만 받는다 (인라인 제거). path_template_intrinsic 는 teaching
+#   캡처의 intrinsic json 경로 (sensores.scanner). 손으로 fx/cx 를 채우지 않는다.
+#   인라인 camera_intrinsics/... 는 더 이상 읽지 않으며, 경로가 없으면 즉시 에러.
+path_template_intrinsic: "datasets/source_0919_intrinsic.json"
 
 # 매칭 포인트의 3D 좌표 (L, R, U 세 점)
 selected_points:
@@ -179,9 +162,10 @@ safe_zones:
     max: [661.8052, 180.7805, 1770.4976]
     euler: [2.7066, 0.5931, -0.1091]
 
-# (선택) hand-eye 캘리브레이션 (teaching 카메라 -> 로봇, 4x4 = inv(T_base2cam)).
-# 있으면 safe zone을 로봇 프레임에서 검사. 매칭(현재 카메라)용은 template이 아니라
-# run_pipeline(target_camera_extrinsic=...) 인자로 전달한다.
+# hand-eye 캘리브레이션 (teaching 카메라 -> 로봇, 4x4 = inv(T_base2cam)).
+# safe_zones 를 쓰면 필수 — safe zone 을 로봇 프레임에서 검사한다. 매칭(현재 카메라)용
+# runtime 캘리브레이션은 template 이 아니라 run_pipeline(target_camera_extrinsic=...) 인자로
+# 매 매칭마다 전달한다 (config fallback 폐기). 둘 중 하나라도 없으면 safe zone 검사는 에러.
 camera_calibration: [[-0.837413760161382, 0.5378965419296572, 0.09698198014317819, 1837.131417220074],
                      [-0.3272940313623728, -0.3513913556545883, -0.8771560478077985, 177.9838240236977],
                      [-0.43774057537192235, -0.7662841674935921, 0.47031028409095144, 2297.800906280515],
@@ -191,10 +175,10 @@ camera_calibration: [[-0.837413760161382, 0.5378965419296572, 0.0969819801431781
 템플릿 파라미터 파일 항목 설명:
 
 - `path_match_source`: 매칭 템플릿(소스) 이미지 경로
-- `camera_intrinsics` / `camera_distortions` / `image_size`: 템플릿(소스) 카메라 파라미터. 소스 카메라(`camera_source`) 객체 생성에 사용됩니다.
+- `path_template_intrinsic` (**필수**): 템플릿(소스) 카메라 intrinsic **json 경로**(`sensores.scanner`). 이 json 에서 소스 카메라(`camera_source`)를 만든다. 최상위 또는 `matching_model` 하위 모두 인식. **인라인 `camera_intrinsics/...` 는 더 이상 읽지 않으며, 이 경로가 없으면 즉시 에러** (stale 값 오사용 방지).
 - `selected_points` (L, R, U): 매칭 대상 anchor 포인트의 3D 좌표
-- `safe_zones` (선택): `L`, `R` anchor가 유효 영역(회전 큐보이드 OBB)을 벗어나면 매칭을 실패 처리하는 안전장치. `camera_calibration`이 함께 주어지면 **로봇 프레임**에서 검사하고, 없으면 카메라 프레임에서 직접 비교합니다. 자세한 동작은 [Safe Zone Check Process](docs/safe_zone_check.md) 참고.
-- `camera_calibration` (선택): **teaching 카메라 → 로봇** hand-eye 변환(4x4). safe zone을 로봇 프레임으로 옮겨 검사하는 데 사용합니다(init 시 1회 파싱). 매칭(현재) 카메라용은 `run_pipeline(target_camera_extrinsic=...)` 인자로 전달합니다.
+- `safe_zones` (선택): `L`, `R` anchor가 유효 영역(회전 큐보이드 OBB)을 벗어나면 매칭을 실패 처리하는 안전장치. **로봇 프레임**에서만 검사하며, teaching(`camera_calibration`) + runtime(`run_pipeline(target_camera_extrinsic=)`) 이 **모두 필요**합니다. 하나라도 없으면 (카메라 프레임 비교로 넘어가지 않고) 에러. 자세한 동작은 [Safe Zone Check Process](docs/safe_zone_check.md) 참고.
+- `camera_calibration` (safe_zones 사용 시 필수): **teaching 카메라 → 로봇** hand-eye 변환(4x4). safe zone을 로봇 프레임으로 옮겨 검사하는 데 사용(init 시 1회 파싱). 매칭(현재) 카메라용 runtime 캘리브레이션은 매 매칭마다 `run_pipeline(target_camera_extrinsic=...)` 인자로 전달합니다 (config fallback 폐기).
 
 > 참고: `path_match_source`, `selected_points`, `safe_zones`, `camera_calibration`은 최상위 또는
 > `matching_model:` 하위 어디에 있어도 인식됩니다. 프로덕션 파일에 포함될 수 있는 `url`,
@@ -327,13 +311,14 @@ transformed_points:
 ## 주요 변경사항
 
 ### 최신 업데이트
-- **Safe Zone 안전장치**: anchor(`L`/`R`)가 유효 영역(OBB)을 벗어나면 매칭 실패로 처리. hand-eye 캘리브레이션(`camera_calibration`)이 주어지면 **로봇 프레임**에서 검사 → [Safe Zone Check Process](docs/safe_zone_check.md)
+- **Safe Zone 안전장치**: anchor(`L`/`R`)가 유효 영역(OBB)을 벗어나면 매칭 실패로 처리. **로봇 프레임**에서 검사하며 teaching+runtime hand-eye 캘리브레이션(`camera_calibration` / `target_camera_extrinsic`)이 모두 필요(없으면 에러) → [Safe Zone Check Process](docs/safe_zone_check.md)
 - **OBB half 계산 버그 수정**: `safe_zones` 의 `min`/`max` 는 회전된 박스의 월드 대각 꼭짓점이므로, half 를 로컬 프레임으로 **역회전(Rᵀ) 후** 산출하도록 수정(`euler != 0` 인 회전 zone 의 판정 정확도 직결)
 - **rerun 디버그 시각화**: `*_result.json` 으로 camera/robot 프레임 3D 뷰(`.rrd`) 생성 (`core/utils/rerun_viz.py`, optional `[viz]` extra)
 - **모델 가중치 영구 보존**: 최초 다운로드 후 `third_party/RoMa/weights/` 로 복사 → HF 캐시가 지워져도 재다운로드 없음
 - **3D RANSAC 튜닝(NX4)**: `ransac_3d.max_correspondence_distance` 0.8→3.0mm (inlier 분포 개선)
 - **결과 객체 반환**: `run_pipeline`이 예외를 던지지 않고 `MatchResult`(`success` / `point_l·r·u` / `plane_normal` / `error_code` 등)를 반환. 실패는 사내 표준 `ErrorCode`로 구분 → [Error Codes](docs/error_codes.md)
-- **파라미터/파싱 견고화**: 필수 키 누락 시 명확한 에러(예: `camera_intrinsics`)와 `INVALID_PARAM` 분류, depth 실패 진단 로그 보강
+- **intrinsic json 경로 전용**: source=`path_template_intrinsic`(template), target=매 매칭마다 `run_pipeline(target_camera_intrinsic=<*_intrinsic.json>)` (인라인 `camera_intrinsics/...`·config 경로·자동탐지 모두 폐기, 없으면 즉시 에러 — stale 값 오사용 방지)
+- **파라미터/파싱 견고화**: 필수 키 누락 시 명확한 에러(예: `path_intrinsic`)와 `INVALID_PARAM` 분류, depth 실패 진단 로그 보강
 - **설정 파일 기반 구동**: CLI 인자 대신 YAML 설정 파일 사용
 - **템플릿 파라미터 분리**: 소스 이미지 및 3D 포인트 좌표를 별도 파일로 관리
 - **카메라 거리 계산 개선**: 포인트 클라우드 크기 대신 매칭 포인트 간 거리 기반 계산 (노이즈에 강건)
@@ -346,3 +331,4 @@ transformed_points:
 - [Safe Zone Check Process](docs/safe_zone_check.md): 매칭 결과 anchor가 유효 영역을 벗어날 때 매칭 실패로 처리하는 안전장치 설명
 - [Rerun 디버그 시각화](docs/rerun_visualization.md): result.json 으로 anchor·safe zone·pose 를 3D(.rrd)로 시각화하는 전체 프로세스 (설치·실행·두 프레임 탭·재생성·트러블슈팅)
 - [Error Codes](docs/error_codes.md): 사내 표준 `ErrorCode` 전체 표, `MMMSEEE` 인코딩, `run_pipeline` 반환 코드 및 `MatchResult`/`MatchingError` 설명
+- [개념 설명(HTML)](docs/explainers/): 매칭 프로세스 / anchor 불변성(카메라가 바뀌어도 템플릿 그대로) 자기완결 페이지 (브라우저로 열기)

@@ -1,0 +1,289 @@
+<title>카메라가 움직여도 템플릿은 그대로 — anchor 추정 원리</title>
+<style>
+:root{
+  --paper:#F2F4F6; --ink:#1B2530; --ink-soft:#5A6B7C; --line:#D5DCE3;
+  --card:#FFFFFF; --card-line:#E3E9EE;
+  --teach:#0092BE; --runtime:#E06B1F; --zone:#2FA361; --anchor:#C99A0E;
+  --ok-bg:#E4F4EA; --ok-fg:#1E7A45; --ng-bg:#FBE7E5; --ng-fg:#B3362B;
+  --code-bg:#E9EDF1;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --paper:#0E141B; --ink:#E4EAF0; --ink-soft:#8DA0B3; --line:#243140;
+    --card:#151D26; --card-line:#243140;
+    --teach:#2CC1EC; --runtime:#F58B41; --zone:#4CC57E; --anchor:#E8B412;
+    --ok-bg:#12301E; --ok-fg:#63D493; --ng-bg:#3A1714; --ng-fg:#F08C82;
+    --code-bg:#1B2530;
+  }
+}
+:root[data-theme="light"]{
+  --paper:#F2F4F6; --ink:#1B2530; --ink-soft:#5A6B7C; --line:#D5DCE3;
+  --card:#FFFFFF; --card-line:#E3E9EE;
+  --teach:#0092BE; --runtime:#E06B1F; --zone:#2FA361; --anchor:#C99A0E;
+  --ok-bg:#E4F4EA; --ok-fg:#1E7A45; --ng-bg:#FBE7E5; --ng-fg:#B3362B;
+  --code-bg:#E9EDF1;
+}
+:root[data-theme="dark"]{
+  --paper:#0E141B; --ink:#E4EAF0; --ink-soft:#8DA0B3; --line:#243140;
+  --card:#151D26; --card-line:#243140;
+  --teach:#2CC1EC; --runtime:#F58B41; --zone:#4CC57E; --anchor:#E8B412;
+  --ok-bg:#12301E; --ok-fg:#63D493; --ng-bg:#3A1714; --ng-fg:#F08C82;
+  --code-bg:#1B2530;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Noto Sans KR","Malgun Gothic",sans-serif;
+  line-height:1.65; font-size:16px;
+}
+.wrap{max-width:880px; margin:0 auto; padding:48px 24px 96px}
+.eyebrow{font-size:12px; letter-spacing:.14em; color:var(--ink-soft); text-transform:uppercase; margin:0 0 10px}
+h1{font-size:clamp(26px,4.2vw,38px); line-height:1.25; margin:0 0 14px; text-wrap:balance; font-weight:800}
+.lede{font-size:17px; color:var(--ink-soft); max-width:62ch; margin:0 0 8px}
+.lede strong{color:var(--ink)}
+h2{font-size:20px; margin:56px 0 16px; font-weight:750}
+p{max-width:68ch}
+code{font-family:ui-monospace,"JetBrains Mono","Cascadia Code",Consolas,monospace; font-size:.86em;
+  background:var(--code-bg); padding:2px 6px; border-radius:4px}
+/* ---------- diagram ---------- */
+.demo{background:var(--card); border:1px solid var(--card-line); border-radius:10px; overflow:hidden; margin:36px 0 8px}
+.demo svg{display:block; width:100%; height:auto}
+.demo-bar{display:flex; flex-wrap:wrap; align-items:center; gap:16px 28px; padding:16px 20px; border-top:1px solid var(--card-line)}
+.demo-bar label{display:flex; align-items:center; gap:10px; font-size:14px; color:var(--ink-soft)}
+input[type=range]{width:200px; accent-color:var(--runtime)}
+.switch{display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none}
+.switch input{accent-color:var(--teach); width:16px; height:16px; cursor:pointer}
+.readout{font-family:ui-monospace,Consolas,monospace; font-variant-numeric:tabular-nums; font-size:13px; color:var(--ink-soft)}
+.readout b{color:var(--ink); font-weight:600}
+.verdict{margin-left:auto; font-size:13px; font-weight:700; padding:4px 12px; border-radius:99px}
+.verdict.ok{background:var(--ok-bg); color:var(--ok-fg)}
+.verdict.ng{background:var(--ng-bg); color:var(--ng-fg)}
+.legend{display:flex; flex-wrap:wrap; gap:8px 20px; font-size:13px; color:var(--ink-soft); margin:12px 2px 0}
+.legend span{display:inline-flex; align-items:center; gap:7px}
+.dot{width:10px; height:10px; border-radius:99px; display:inline-block}
+.caption{font-size:13px; color:var(--ink-soft); margin:10px 2px 0; max-width:72ch}
+/* ---------- flow ---------- */
+.flow{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; margin-top:20px}
+.step{background:var(--card); border:1px solid var(--card-line); border-radius:8px; padding:18px 18px 16px; position:relative}
+.step .no{font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--ink-soft); letter-spacing:.08em}
+.step h3{margin:6px 0 8px; font-size:15.5px; font-weight:700}
+.step p{font-size:13.5px; color:var(--ink-soft); margin:0}
+.step .fixed{position:absolute; top:16px; right:14px; font-size:11px; font-weight:700; letter-spacing:.06em;
+  padding:2px 8px; border-radius:99px; background:var(--ok-bg); color:var(--ok-fg)}
+.step .live{background:color-mix(in srgb, var(--runtime) 14%, transparent); color:var(--runtime)}
+/* ---------- callout ---------- */
+.key{margin-top:44px; border-left:3px solid var(--teach); background:var(--card); border-radius:0 8px 8px 0;
+  padding:20px 24px}
+.key p{margin:0; font-size:16.5px; max-width:66ch}
+.foot{margin-top:48px; font-size:13px; color:var(--ink-soft); border-top:1px solid var(--line); padding-top:16px}
+.foot code{font-size:12px}
+@media (prefers-reduced-motion: no-preference){
+  .anim{transition:transform .18s ease, opacity .18s ease}
+}
+input[type=range]:focus-visible,.switch input:focus-visible{outline:2px solid var(--teach); outline-offset:2px}
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Autochecker Matching · 좌표계 원리</p>
+  <h1>카메라가 움직여도, 템플릿은 다시 만들지 않는다</h1>
+  <p class="lede">템플릿은 <strong>teaching 시점에 한 번</strong> 정의된다. 런타임 카메라가 이동해도
+  매칭이 <strong>상대포즈를 매 프레임 새로</strong> 구하므로 anchor는 계속 추정된다.
+  카메라 이동분은 <code>cam_to_base</code> 한 값으로만 흡수한다.</p>
+
+  <!-- ================= interactive diagram ================= -->
+  <div class="demo">
+    <svg viewBox="0 0 900 470" role="img" aria-label="base 좌표계에서 세이프존, anchor, teaching/runtime 카메라의 관계 다이어그램">
+      <!-- grid -->
+      <g id="grid" stroke="var(--line)" stroke-width="1" opacity=".55"></g>
+
+      <!-- base origin -->
+      <g transform="translate(90,400)">
+        <line x1="0" y1="0" x2="52" y2="0" stroke="#C24040" stroke-width="2.5"/>
+        <line x1="0" y1="0" x2="0" y2="-52" stroke="#3B7DD8" stroke-width="2.5"/>
+        <circle r="5" fill="var(--ink)"/>
+        <text x="-4" y="26" font-size="13" fill="var(--ink)" font-weight="700">base</text>
+        <text x="56" y="4" font-size="11" fill="#C24040">X</text>
+        <text x="-16" y="-56" font-size="11" fill="#3B7DD8">Z</text>
+      </g>
+
+      <!-- part (hood, base에 고정) -->
+      <g id="part">
+        <path d="M 380 140 Q 520 96 660 140 L 640 186 Q 520 158 400 186 Z"
+              fill="color-mix(in srgb, var(--ink) 8%, transparent)"
+              stroke="var(--ink-soft)" stroke-width="1.2"/>
+        <text x="520" y="128" font-size="12" fill="var(--ink-soft)" text-anchor="middle">부품 (hood)</text>
+      </g>
+
+      <!-- safe zones: base 에 고정 -->
+      <g id="zones" stroke="var(--zone)" stroke-width="2" fill="color-mix(in srgb, var(--zone) 12%, transparent)">
+        <rect x="415" y="138" width="56" height="46" rx="3" transform="rotate(-4 443 161)"/>
+        <rect x="585" y="142" width="56" height="46" rx="3" transform="rotate(-4 613 165)"/>
+      </g>
+      <text x="410" y="206" font-size="11.5" fill="var(--zone)" font-weight="700">safe zone L</text>
+      <text x="582" y="210" font-size="11.5" fill="var(--zone)" font-weight="700">safe zone R</text>
+
+      <!-- 실제 anchor (base 에 고정, 참값) -->
+      <g id="anchors-true">
+        <circle cx="443" cy="161" r="7" fill="var(--anchor)"/>
+        <circle cx="613" cy="165" r="7" fill="var(--anchor)"/>
+        <circle cx="528" cy="150" r="7" fill="var(--anchor)"/>
+      </g>
+
+      <!-- 추정 anchor (cam_to_base 로 base 에 매핑된 값) -->
+      <g id="anchors-est" class="anim">
+        <circle cx="443" cy="161" r="11" fill="none" stroke="var(--anchor)" stroke-width="2.5" stroke-dasharray="4 3"/>
+        <circle cx="613" cy="165" r="11" fill="none" stroke="var(--anchor)" stroke-width="2.5" stroke-dasharray="4 3"/>
+        <circle cx="528" cy="150" r="11" fill="none" stroke="var(--anchor)" stroke-width="2.5" stroke-dasharray="4 3"/>
+      </g>
+
+      <!-- teaching camera (고정) -->
+      <g id="cam-teach" transform="translate(360,330)">
+        <polygon points="0,0 -16,26 16,26" fill="var(--teach)"/>
+        <rect x="-11" y="26" width="22" height="14" rx="3" fill="var(--teach)"/>
+        <text x="0" y="58" font-size="12.5" fill="var(--teach)" text-anchor="middle" font-weight="700">teaching cam</text>
+        <text x="0" y="73" font-size="11" fill="var(--ink-soft)" text-anchor="middle">(템플릿 촬영 시점)</text>
+      </g>
+      <!-- base ↔ teaching link -->
+      <line id="link-teach" x1="90" y1="400" x2="360" y2="352" stroke="var(--teach)" stroke-width="2" stroke-dasharray="7 5" opacity=".8"/>
+      <text x="196" y="362" font-size="11.5" fill="var(--teach)" transform="rotate(-10 196 362)">cam_to_base (teaching)</text>
+
+      <!-- runtime camera (슬라이더로 이동) -->
+      <g id="cam-runtime" class="anim" transform="translate(560,330)">
+        <polygon points="0,0 -16,26 16,26" fill="var(--runtime)"/>
+        <rect x="-11" y="26" width="22" height="14" rx="3" fill="var(--runtime)"/>
+        <text x="0" y="58" font-size="12.5" fill="var(--runtime)" text-anchor="middle" font-weight="700">runtime cam</text>
+      </g>
+      <line id="link-runtime" class="anim" x1="90" y1="400" x2="560" y2="352" stroke="var(--runtime)" stroke-width="2" stroke-dasharray="7 5" opacity=".8"/>
+      <text id="link-runtime-label" x="330" y="392" font-size="11.5" fill="var(--runtime)">cam_to_base (runtime)</text>
+
+      <!-- 이동량 표시 -->
+      <g id="delta" class="anim" opacity="0">
+        <line id="delta-line" x1="360" y1="312" x2="560" y2="312" stroke="var(--ink-soft)" stroke-width="1.5"/>
+        <text id="delta-text" x="460" y="303" font-size="12" fill="var(--ink-soft)" text-anchor="middle" font-family="ui-monospace,Consolas,monospace">Δ 0 mm</text>
+      </g>
+
+      <!-- 상대포즈 화살표: runtime cam → 부품 -->
+      <path id="relpose" class="anim" d="" fill="none" stroke="var(--ink-soft)" stroke-width="1.6" stroke-dasharray="3 4" opacity=".85"/>
+      <text id="relpose-label" x="0" y="0" font-size="11.5" fill="var(--ink-soft)">매칭 → 상대포즈 (4×4)</text>
+    </svg>
+
+    <div class="demo-bar">
+      <label>runtime 카메라 이동
+        <input id="slider" type="range" min="0" max="300" value="200" step="5" aria-label="runtime 카메라 이동량 (mm)">
+      </label>
+      <label class="switch" title="카메라 이동 후 cam_to_base 를 새 값으로 갱신했는가">
+        <input id="calib" type="checkbox" checked>
+        <span>cam_to_base 갱신</span>
+      </label>
+      <span class="readout">Δ = <b id="ro-delta">1000</b> mm · anchor 오차 <b id="ro-err">0</b> mm</span>
+      <span id="verdict" class="verdict ok">판정 OK — anchor가 세이프존 안</span>
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--teach)"></span>teaching 카메라 (고정)</span>
+    <span><span class="dot" style="background:var(--runtime)"></span>runtime 카메라 (이동)</span>
+    <span><span class="dot" style="background:var(--anchor)"></span>anchor 참값</span>
+    <span><span class="dot" style="border:2px dashed var(--anchor); width:8px; height:8px; background:none"></span>anchor 추정값</span>
+    <span><span class="dot" style="background:var(--zone)"></span>세이프존 (base 고정)</span>
+  </div>
+  <p class="caption">슬라이더로 runtime 카메라를 옮겨 보세요. <b>cam_to_base 갱신</b>이 켜져 있으면 카메라가 어디로 가든
+  추정 anchor(점선 원)는 참값 위에 그대로 겹칩니다. 꺼 보면 — 옛 캘리브레이션으로 base에 매핑되는 바람에
+  추정값이 카메라 이동량만큼 끌려가 세이프존을 벗어나고, <b>정상 부품이 NG로 오검</b>됩니다.</p>
+
+  <!-- ================= flow ================= -->
+  <h2>동작 흐름 — 무엇이 고정이고, 무엇이 매번 새로 구해지는가</h2>
+  <div class="flow">
+    <div class="step"><span class="no">STEP 1</span><span class="fixed">고정</span>
+      <h3>템플릿 (teaching)</h3>
+      <p>기준 RGB/depth, anchor 정의점(<code>selected_points</code>), base 세이프존,
+      teaching <code>cam_to_base</code>. 한 번 만들고 다시 손대지 않는다.</p>
+    </div>
+    <div class="step"><span class="no">STEP 2</span><span class="fixed live">매 프레임</span>
+      <h3>매칭 → 상대포즈</h3>
+      <p>RoMa V2가 템플릿과 현재 화면의 대응점으로 <b>3D 상대포즈(4×4)</b>를 구한다.
+      "이 객체가 지금 카메라에서 어디에·어떤 자세로 보이나" — 카메라의 절대 위치와 무관하다.</p>
+    </div>
+    <div class="step"><span class="no">STEP 3</span><span class="fixed live">매 프레임</span>
+      <h3>anchor 추정</h3>
+      <p>템플릿의 anchor 정의점에 상대포즈를 적용 → <b>현재 카메라 프레임의 anchor 3D</b>.
+      카메라가 어디에 있든 새로 산출된다.</p>
+    </div>
+    <div class="step"><span class="no">STEP 4</span><span class="fixed">base 판정</span>
+      <h3>base 매핑 · 세이프존 검사</h3>
+      <p>anchor는 <b>runtime</b> <code>cam_to_base</code>로, 세이프존은 <b>teaching</b>
+      <code>cam_to_base</code>로 base에 올려 비교한다. 세이프존은 base에 고정.</p>
+    </div>
+  </div>
+
+  <!-- ================= key ================= -->
+  <div class="key">
+    <p><b>카메라가 재배치되어도 템플릿을 다시 만들 필요가 없다.</b>
+    바뀐 것은 카메라→로봇 관계(<code>cam_to_base</code>) 하나뿐이며,
+    그 값만 갱신하면 매칭이 상대포즈로 anchor를 계속 정확히 추정한다.
+    갱신하지 않으면 — 위 다이어그램의 토글이 보여주듯 — 정상 부품이 NG로 오검된다.</p>
+  </div>
+
+  <p class="foot">3D 데모: <code>rerun --web-viewer data/manual_demo/hood_demo.rrd</code>
+  — base 원점에서 1 m 거리의 두 카메라(1 m 간격), base 고정 세이프존·anchor·후드 점군을 실측 좌표로 확인할 수 있다.
+  본 다이어그램은 개념 도식이며 축척은 실제와 다르다.</p>
+</div>
+
+<script>
+(function(){
+  var slider=document.getElementById('slider'), calib=document.getElementById('calib');
+  var camR=document.getElementById('cam-runtime'), linkR=document.getElementById('link-runtime');
+  var linkRLabel=document.getElementById('link-runtime-label');
+  var est=document.getElementById('anchors-est');
+  var delta=document.getElementById('delta'), dLine=document.getElementById('delta-line'), dText=document.getElementById('delta-text');
+  var rel=document.getElementById('relpose'), relLabel=document.getElementById('relpose-label');
+  var verdict=document.getElementById('verdict'), roD=document.getElementById('ro-delta'), roE=document.getElementById('ro-err');
+
+  // grid
+  var g=document.getElementById('grid'), NS='http://www.w3.org/2000/svg';
+  for(var x=60;x<900;x+=60){var l=document.createElementNS(NS,'line');l.setAttribute('x1',x);l.setAttribute('y1',20);l.setAttribute('x2',x);l.setAttribute('y2',450);g.appendChild(l);}
+  for(var y=40;y<470;y+=60){var l2=document.createElementNS(NS,'line');l2.setAttribute('x1',30);l2.setAttribute('y1',y);l2.setAttribute('x2',870);l2.setAttribute('y2',y);g.appendChild(l2);}
+
+  var TX=360, TY=330;          // teaching cam
+  var BASE={x:90,y:400};
+  var SCALE=0.5;               // 1mm → 0.5px (도식)
+  var ZONE_HALF=23;            // 세이프존 반경(px) — 이탈 판정용
+
+  function update(){
+    var s=parseInt(slider.value,10);
+    var mm=Math.round(s/300*1500);                // Δ: 0..1500mm (기본 200 → 1000mm = 3D 데모와 동일)
+    var dx=(s/300)*450;                           // 도식 px 이동 (Δ=0 이면 teaching 과 겹침)
+    var cx=TX+dx, cy=TY;
+
+    camR.setAttribute('transform','translate('+cx+','+cy+')');
+    linkR.setAttribute('x2',cx); linkR.setAttribute('y2',cy+22);
+    linkRLabel.setAttribute('x',(BASE.x+cx)/2-40); linkRLabel.setAttribute('y',(BASE.y+cy+22)/2+16);
+
+    // Δ 표시
+    delta.setAttribute('opacity', mm>0 ? 1 : 0);
+    dLine.setAttribute('x1',TX); dLine.setAttribute('x2',cx);
+    dText.setAttribute('x',(TX+cx)/2); dText.textContent='Δ '+mm+' mm';
+
+    // 상대포즈 화살표 (runtime cam → 부품 중심) — 카메라가 어디 있든 매칭이 새로 구함
+    var px0=cx, py0=cy-4, px1=525, py1=175;
+    var mx=(px0+px1)/2+40, my=(py0+py1)/2;
+    rel.setAttribute('d','M '+px0+' '+py0+' Q '+mx+' '+my+' '+px1+' '+py1);
+    relLabel.setAttribute('x',mx+8); relLabel.setAttribute('y',my+4);
+
+    // anchor 추정값: 갱신 ON → 항상 참값에 겹침.
+    // OFF → 옛(teaching) calib 로 base 매핑 → 카메라 이동량 Δ 만큼 끌려감.
+    var updated=calib.checked;
+    var shift=updated?0:dx*0.25;                  // 도식 스케일 (Δ=1000mm ≈ 75px)
+    est.setAttribute('transform','translate('+shift+',0)');
+
+    var errmm=updated?0:mm;
+    roD.textContent=mm; roE.textContent=errmm;
+
+    var inside=updated || shift<=ZONE_HALF;
+    if(inside){verdict.className='verdict ok'; verdict.textContent='판정 OK — anchor가 세이프존 안';}
+    else{verdict.className='verdict ng'; verdict.textContent='판정 NG(오검) — 추정 anchor가 존 밖';}
+  }
+  slider.addEventListener('input',update);
+  calib.addEventListener('change',update);
+  update();
+})();
+</script>
