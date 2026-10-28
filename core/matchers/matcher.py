@@ -4,6 +4,7 @@
 """
 
 from re import L, S, T
+import os
 import sys
 from pathlib import Path
 import numpy as np
@@ -25,7 +26,8 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 # 로거 설정
-from core.utils.logger_utils import setup_logger
+from core.utils.logger_utils import setup_logger, add_daily_file_handler
+from core.utils import resource_monitor as resmon
 from .errors import MatcherError
 from .error_handler import ErrorCode
 from .results import MatchResult
@@ -66,6 +68,14 @@ from ..utils.geometry_utils import (
     as_4x4_matrix,
     transform_point_3d,
 )
+
+# 크래시·무응답 진단 로그 — 호출 프로세스의 stdout 수집 여부와 무관하게 남도록 파일로도 기록.
+#   MATCHING_LOG_DIR          : 로그 디렉터리 (기본 ~/.cmes/CRP_Project/logs).
+#                               <dir>/YYYY-MM/hood_matching_YYYYMMDD.log
+#   MATCHING_HANG_TIMEOUT_SEC : Matcher 초기화 / run_pipeline 무응답 판정(초). 0 이면 끔.
+LOG_DIR = os.environ.get("MATCHING_LOG_DIR", "~/.cmes/CRP_Project/logs")
+LOG_PREFIX = "hood_matching"
+HANG_TIMEOUT_SEC = float(os.environ.get("MATCHING_HANG_TIMEOUT_SEC", "60"))
 
 
 class Matcher:
@@ -123,6 +133,17 @@ class Matcher:
             self.logger = setup_logger(__name__, logging.DEBUG)
         else:
             self.logger = setup_logger(__name__, logging.INFO)
+
+        # 크래시·무응답 진단: 로그 파일 + segfault 덤프 + hang 감시 (문제가 생길 때만 기록)
+        self._log_file_handler = None
+        self._fault_file = None
+        self._watchdog = resmon.HangWatchdog(HANG_TIMEOUT_SEC, self._on_hang)
+        try:
+            self._log_file_handler = add_daily_file_handler(self.logger, LOG_DIR, LOG_PREFIX)
+        except Exception as e:
+            self.logger.warning(f"log file 설정 실패: {e}")
+        self._ensure_fault_dump()
+
         # 사용자 설정으로 기본 설정 업데이트
         if config:
             self.default_config.update(config)
@@ -137,31 +158,35 @@ class Matcher:
 
         self.matching_time = 0.0
 
-        # 모델 초기화
-        init_start_time = time.time()
-        conf = Roma.default_conf.copy()
-        conf["max_keypoints"] = self.config["max_keypoints"]
-        conf["match_threshold"] = self.config["match_threshold"]
-        conf["model_name"] = self.config["model_name"]
-        self.model = Roma(conf)
+        # 모델 초기화 (모델 로드 + warmup + init_config 무응답 감시)
+        self._watchdog.arm("Matcher init")
+        try:
+            init_start_time = time.time()
+            conf = Roma.default_conf.copy()
+            conf["max_keypoints"] = self.config["max_keypoints"]
+            conf["match_threshold"] = self.config["match_threshold"]
+            conf["model_name"] = self.config["model_name"]
+            self.model = Roma(conf)
 
-        model_init_time = time.time() - init_start_time
-        self.logger.info(
-            f"Model initialization completed (time: {model_init_time:.3f} seconds)"
-        )
+            model_init_time = time.time() - init_start_time
+            self.logger.info(
+                f"Model initialization completed (time: {model_init_time:.3f} seconds)"
+            )
 
-        self._warmup_model()
+            self._warmup_model()
 
-        self.camera_target = None
-        self.camera_source = None
-        # hand-eye 캘리브레이션 (cam -> robot, 4x4). safe zone 로봇 프레임 검사용.
-        #  - template(teaching): template_param 에서 init 시 1회 파싱해 캐싱.
-        #  - runtime(매칭): run_pipeline 의 target_camera_extrinsic 인자로 매 호출 전달.
-        #    (없으면 config 의 camera_calibration 으로 fallback)
-        self.template_camera_calibration = None
-        self.runtime_camera_calibration = None
+            self.camera_target = None
+            self.camera_source = None
+            # hand-eye 캘리브레이션 (cam -> robot, 4x4). safe zone 로봇 프레임 검사용.
+            #  - template(teaching): template_param 에서 init 시 1회 파싱해 캐싱.
+            #  - runtime(매칭): run_pipeline 의 target_camera_extrinsic 인자로 매 호출 전달.
+            #    (없으면 config 의 camera_calibration 으로 fallback)
+            self.template_camera_calibration = None
+            self.runtime_camera_calibration = None
 
-        self.init_config(config=config, template_param=template_param)
+            self.init_config(config=config, template_param=template_param)
+        finally:
+            self._watchdog.disarm()
         # Camera 객체 생성 및 이미지 undistortion
         # YAML 설정에서 카메라 파라미터 직접 읽기
         time.sleep(1)
@@ -195,6 +220,47 @@ class Matcher:
             )
         except Exception as e:
             self.logger.warning(f"Model warmup failed: {e}")
+            self._log_exception_resources(e)
+
+    def _log_exception_resources(self, e: Exception) -> None:
+        """예외 발생 시 VRAM/RAM 상태 기록. CUDA OOM 이면 GPU 점유 프로세스 + 캐시 반환까지."""
+        # 진단 로깅 실패가 원래 실패 처리를 막으면 안 됨.
+        try:
+            oom = resmon.is_cuda_oom(e)
+            self.logger.error(resmon.format_snapshot(resmon.snapshot(), "CUDA OOM" if oom else "on exception"))
+            if oom:
+                self.logger.error(resmon.format_gpu_processes(resmon.gpu_processes()))
+                resmon.empty_cache()
+        except Exception:
+            pass
+
+    def _on_hang(self, tag: str, elapsed: float, stack: str) -> None:
+        # HangWatchdog 타이머 스레드에서 호출 — 처리 스레드는 아직 막혀있는 상태.
+        self.logger.error(f"{tag} 응답 없음 ({elapsed:.0f}s 경과) — 처리 스레드 스택:\n{stack}")
+        self.logger.error(resmon.format_snapshot(resmon.snapshot(), f"{tag} hang"))
+        self.logger.error(resmon.format_gpu_processes(resmon.gpu_processes()))
+
+    def _ensure_fault_dump(self) -> None:
+        """segfault/abort 시 파이썬 스택을 로그 파일(hood_matching_YYYYMMDD.log)에 직접 덤프.
+
+        faulthandler 는 시그널 핸들러에서 fd 로 바로 쓰므로 logging 을 거칠 수 없다 → 날짜별
+        로그 파일을 대상으로 지정. 날짜가 바뀌면 파일도 바뀌므로 run_pipeline 시작마다 호출해
+        대상 파일을 따라간다 (같으면 no-op). faulthandler 는 프로세스 전역 설정임에 주의.
+        """
+        if self._log_file_handler is None:
+            return
+        path = str(self._log_file_handler.path_for(time.time()).resolve())
+        if self._fault_file is not None and self._fault_file.name == path:
+            return
+        try:
+            old = self._fault_file
+            self._fault_file = resmon.enable_fault_dump(Path(path))
+            self._watchdog.fault_file = self._fault_file
+            if old is not None:
+                old.close()
+            self.logger.info(f"log file / fault dump → {path}")
+        except Exception as e:
+            self.logger.warning(f"fault dump 설정 실패: {e}")
 
     def init_config(
         self,
@@ -419,6 +485,8 @@ class Matcher:
                 )
         except Exception as e:
             self.logger.error(f"Error occurred: {e}")
+            # 매칭 forward 의 CUDA OOM 은 여기서 삼켜져 이후 "2D matching failed" 로만 보이므로 상태를 남김.
+            self._log_exception_resources(e)
             return None
 
         return {
@@ -1336,6 +1404,11 @@ class Matcher:
                details={"point", "position"}; depth 실패는 DEPTH_CALCULATION_FAILED /
                DEPTH_OUT_OF_RANGE; 그 외는 MATCH_FAILED)
         """
+        # 크래시·무응답 진단: 날짜 바뀐 로그 파일로 fault dump 대상 갱신, 호출 단위 peak VRAM,
+        # HANG_TIMEOUT_SEC 내 반환 안 하면 막힌 위치 스택 + VRAM 상태 기록.
+        self._ensure_fault_dump()
+        resmon.reset_peak()
+        self._watchdog.arm("run_pipeline")
         try:
             # 경로 설정 (셋업도 try 안에서 처리 → 실패 시 예외 대신 MatchResult 반환)
             target_depth_path = target_depth_path or self.config.get("target_depth_path")
@@ -1756,7 +1829,10 @@ class Matcher:
             # 예상치 못한 실패(2D/3D 매칭·필터링 등)는 일반 코드(MATCH_FAILED)로
             # 묶어 결과 객체로 반환한다.
             self.logger.error(f"Matching failed: {e}")
+            self._log_exception_resources(e)
             return MatchResult.fail(ErrorCode.MATCH_FAILED, str(e))
+        finally:
+            self._watchdog.disarm()
 
     def calculate_3d_points(
         self, result1_3d: np.ndarray, result2_3d: np.ndarray, result3_3d: np.ndarray, camera: Camera

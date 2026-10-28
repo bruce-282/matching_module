@@ -294,6 +294,23 @@ transformed_points:
 - **INFO 레벨**: 시간 측정 결과 및 주요 진행 상황
 - **DEBUG 레벨**: 상세한 처리 과정 및 중간 결과 (설정 파일에서 `debug_mode: true`로 설정 시)
 
+### 로그 파일 / 크래시·무응답 로그
+
+`Matcher` 로그는 콘솔과 함께 날짜별 파일 `~/.cmes/CRP_Project/logs/YYYY-MM/hood_matching_YYYYMMDD.log`
+에도 남습니다 (라이브러리로 호출할 때 호출 프로세스가 stdout 을 모으지 않아도 남도록). 평소엔 추가 로그가
+없고, 문제가 생겼을 때만 아래를 기록합니다.
+
+| 상황 | 기록 |
+|---|---|
+| 예외 (`run_matching` / `run_pipeline` / warmup) | `[RES] on exception` — VRAM(torch·디바이스)/RAM 한 줄. CUDA OOM 이면 `[RES] CUDA OOM` + `[RES] gpu procs` (GPU 점유 프로세스) + `empty_cache` |
+| 응답 없음 (hang) | `run_pipeline 응답 없음 (Ns 경과)` / `Matcher init 응답 없음` + 막힌 위치 스택 + `[RES] ... hang`. 타임아웃 +5s 에 faulthandler 전체 스레드 덤프 |
+| segfault / abort | `Fatal Python error: ...` + 전체 스레드 스택 (faulthandler, 같은 로그 파일에 직접) |
+
+- 환경변수: `MATCHING_LOG_DIR` (로그 디렉터리, 기본 `~/.cmes/CRP_Project/logs`), `MATCHING_HANG_TIMEOUT_SEC` (기본 60, 0 이면 끔).
+- faulthandler 는 프로세스 전역 설정이라, 라이브러리로 호출하면 호출 프로세스의 크래시 덤프도 이 파일로 갑니다.
+- OS OOM-kill(SIGKILL) 은 프로세스 안에서 못 잡음 →
+  `sudo journalctl _TRANSPORT=kernel --since "YYYY-MM-DD" | grep -iE "out of memory|oom-kill|killed process|NVRM: Xid"`
+
 ## 문제 해결
 
 ### 일반적인 오류
@@ -311,6 +328,7 @@ transformed_points:
 ## 주요 변경사항
 
 ### 최신 업데이트
+- **크래시·무응답 진단 로그 (0.1.1)**: 날짜별 로그 파일 + 예외 시 VRAM/RAM 스냅샷 + hang 감시 + segfault 덤프 → [로그 파일 / 크래시·무응답 로그](#로그-파일--크래시무응답-로그), [CHANGELOG](CHANGELOG.md)
 - **Safe Zone 안전장치**: anchor(`L`/`R`)가 유효 영역(OBB)을 벗어나면 매칭 실패로 처리. **로봇 프레임**에서 검사하며 teaching+runtime hand-eye 캘리브레이션(`camera_calibration` / `target_camera_extrinsic`)이 모두 필요(없으면 에러) → [Safe Zone Check Process](docs/safe_zone_check.md)
 - **OBB half 계산 버그 수정**: `safe_zones` 의 `min`/`max` 는 회전된 박스의 월드 대각 꼭짓점이므로, half 를 로컬 프레임으로 **역회전(Rᵀ) 후** 산출하도록 수정(`euler != 0` 인 회전 zone 의 판정 정확도 직결)
 - **rerun 디버그 시각화**: `*_result.json` 으로 camera/robot 프레임 3D 뷰(`.rrd`) 생성 (`core/utils/rerun_viz.py`, optional `[viz]` extra)
