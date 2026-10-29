@@ -4,6 +4,8 @@
 
 import logging
 import sys
+import time
+from pathlib import Path
 from typing import Optional
 
 
@@ -194,3 +196,45 @@ def get_debug_logger(name: str = __name__) -> logging.Logger:
 def get_file_logger(name: str = __name__, log_file: str = 'app.log') -> logging.Logger:
     """파일 로거를 반환합니다."""
     return setup_file_logger(name, logging.INFO, log_file)
+
+
+class DailyFileHandler(logging.FileHandler):
+    """``<log_dir>/YYYY-MM/<prefix>_YYYYMMDD.log`` 에 기록하는 핸들러. 날짜가 바뀌면 새 파일로 넘어간다."""
+
+    def __init__(self, log_dir: str, prefix: str, encoding: str = 'utf-8'):
+        self.log_dir = Path(log_dir).expanduser()
+        self.prefix = prefix
+        path = self.path_for(time.time())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__(str(path), mode='a', encoding=encoding)
+
+    def path_for(self, t: float) -> Path:
+        lt = time.localtime(t)
+        return self.log_dir / time.strftime('%Y-%m', lt) / f"{self.prefix}_{time.strftime('%Y%m%d', lt)}.log"
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Handler.handle 이 lock 을 잡은 상태로 호출 — 파일 교체가 다른 스레드 기록과 겹치지 않음.
+        path = str(self.path_for(record.created).resolve())
+        if path != self.baseFilename:
+            if self.stream is not None:
+                self.stream.close()
+                self.stream = None
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self.baseFilename = path
+        super().emit(record)
+
+
+def add_daily_file_handler(
+    logger: logging.Logger,
+    log_dir: str,
+    prefix: str,
+    date_format: str = '%Y-%m-%d %H:%M:%S',
+) -> DailyFileHandler:
+    """기존 로거에 날짜별 파일 핸들러를 추가합니다 (콘솔 출력은 그대로 유지)."""
+    handler = DailyFileHandler(log_dir, prefix)
+    handler.setFormatter(logging.Formatter(
+        fmt='%(asctime)s %(levelname)-6s %(filename)s:%(lineno)d: %(message)s',
+        datefmt=date_format,
+    ))
+    logger.addHandler(handler)
+    return handler
