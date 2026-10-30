@@ -8,6 +8,30 @@
 
 ---
 
+## [0.1.2] — 2026-10-30
+
+로그 파일 디렉터리를 matcher config 에서 지정할 수 있게 했습니다. 그 외 동작은 0.1.1 과 같습니다.
+
+### Changed
+
+- **로그 디렉터리 config 지정.** matcher config(`--config_path` / `Matcher(config=...)`)의 `log_dir` 로
+  로그 파일 위치를 바꿉니다. 우선순위는 config `log_dir` → 환경변수 `MATCHING_LOG_DIR` → 기본
+  `~/.cmes/CRP_Project/logs` 입니다. 파일은 `<log_dir>/YYYY-MM/hood_matching_YYYYMMDD.log` 로 0.1.1 과 같습니다.
+
+  ```yaml
+  log_dir: "/data/cmes/logs"   # 선택. ~ 와 상대경로(실행 위치 기준) 허용
+  ```
+- `init_config` 로 `log_dir` 이 바뀌면 그 뒤 로그와 segfault 덤프부터 새 디렉터리에 남습니다.
+- `MATCHING_LOG_DIR` 을 모듈 import 시점이 아니라 `Matcher` 생성 시점에 읽습니다.
+
+### 호환성
+
+- `log_dir` 이 없는 기존 config 는 0.1.1 과 같은 위치에 기록합니다.
+- `run_pipeline` 인자·반환값·에러코드, 매칭 결과값, 의존성: 변경 없음.
+- 패키지 버전(`pyproject.toml`) `0.1.1` → `0.1.2`.
+
+---
+
 ## [0.1.1] — 2026-10-28
 
 `hmma-0.1.0-rc5` 에 **크래시·무응답 진단 로그**를 더한 버전입니다. 매칭 결과·`run_pipeline` 인자와 반환값

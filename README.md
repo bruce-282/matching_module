@@ -119,6 +119,10 @@ image_undistortion: true           # 이미지 왜곡 보정 활성화
 
 # Depth 설정
 depth_max: 2500.0                  # Depth map 최대 값
+
+# 로그 파일 디렉터리 (선택). <log_dir>/YYYY-MM/hood_matching_YYYYMMDD.log
+# 없으면 환경변수 MATCHING_LOG_DIR → 기본 ~/.cmes/CRP_Project/logs
+# log_dir: "~/.cmes/CRP_Project/logs"
 ```
 
 ### 템플릿 파라미터 파일 (matcher.teaching.param.yaml)
@@ -306,7 +310,9 @@ transformed_points:
 | 응답 없음 (hang) | `run_pipeline 응답 없음 (Ns 경과)` / `Matcher init 응답 없음` + 막힌 위치 스택 + `[RES] ... hang`. 타임아웃 +5s 에 faulthandler 전체 스레드 덤프 |
 | segfault / abort | `Fatal Python error: ...` + 전체 스레드 스택 (faulthandler, 같은 로그 파일에 직접) |
 
-- 환경변수: `MATCHING_LOG_DIR` (로그 디렉터리, 기본 `~/.cmes/CRP_Project/logs`), `MATCHING_HANG_TIMEOUT_SEC` (기본 60, 0 이면 끔).
+- 로그 디렉터리: matcher config `log_dir` → 환경변수 `MATCHING_LOG_DIR` → 기본 `~/.cmes/CRP_Project/logs` 순으로 정합니다.
+  `init_config` 로 `log_dir` 이 바뀌면 그 뒤 로그부터 새 디렉터리에 남습니다.
+- 환경변수: `MATCHING_HANG_TIMEOUT_SEC` (무응답 판정 초, 기본 60, 0 이면 끔).
 - faulthandler 는 프로세스 전역 설정이라, 라이브러리로 호출하면 호출 프로세스의 크래시 덤프도 이 파일로 갑니다.
 - OS OOM-kill(SIGKILL) 은 프로세스 안에서 못 잡음 →
   `sudo journalctl _TRANSPORT=kernel --since "YYYY-MM-DD" | grep -iE "out of memory|oom-kill|killed process|NVRM: Xid"`
@@ -328,6 +334,7 @@ transformed_points:
 ## 주요 변경사항
 
 ### 최신 업데이트
+- **로그 디렉터리 config 지정 (0.1.2)**: matcher config `log_dir` 로 로그 파일 위치 변경 → [CHANGELOG](CHANGELOG.md)
 - **크래시·무응답 진단 로그 (0.1.1)**: 날짜별 로그 파일 + 예외 시 VRAM/RAM 스냅샷 + hang 감시 + segfault 덤프 → [로그 파일 / 크래시·무응답 로그](#로그-파일--크래시무응답-로그), [CHANGELOG](CHANGELOG.md)
 - **Safe Zone 안전장치**: anchor(`L`/`R`)가 유효 영역(OBB)을 벗어나면 매칭 실패로 처리. **로봇 프레임**에서 검사하며 teaching+runtime hand-eye 캘리브레이션(`camera_calibration` / `target_camera_extrinsic`)이 모두 필요(없으면 에러) → [Safe Zone Check Process](docs/safe_zone_check.md)
 - **OBB half 계산 버그 수정**: `safe_zones` 의 `min`/`max` 는 회전된 박스의 월드 대각 꼭짓점이므로, half 를 로컬 프레임으로 **역회전(Rᵀ) 후** 산출하도록 수정(`euler != 0` 인 회전 zone 의 판정 정확도 직결)

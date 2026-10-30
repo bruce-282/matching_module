@@ -70,10 +70,10 @@ from ..utils.geometry_utils import (
 )
 
 # 크래시·무응답 진단 로그 — 호출 프로세스의 stdout 수집 여부와 무관하게 남도록 파일로도 기록.
-#   MATCHING_LOG_DIR          : 로그 디렉터리 (기본 ~/.cmes/CRP_Project/logs).
+#   로그 디렉터리             : config `log_dir` → 환경변수 MATCHING_LOG_DIR → 기본 ~/.cmes/CRP_Project/logs
 #                               <dir>/YYYY-MM/hood_matching_YYYYMMDD.log
 #   MATCHING_HANG_TIMEOUT_SEC : Matcher 초기화 / run_pipeline 무응답 판정(초). 0 이면 끔.
-LOG_DIR = os.environ.get("MATCHING_LOG_DIR", "~/.cmes/CRP_Project/logs")
+LOG_DIR_DEFAULT = "~/.cmes/CRP_Project/logs"
 LOG_PREFIX = "hood_matching"
 HANG_TIMEOUT_SEC = float(os.environ.get("MATCHING_HANG_TIMEOUT_SEC", "60"))
 
@@ -138,11 +138,7 @@ class Matcher:
         self._log_file_handler = None
         self._fault_file = None
         self._watchdog = resmon.HangWatchdog(HANG_TIMEOUT_SEC, self._on_hang)
-        try:
-            self._log_file_handler = add_daily_file_handler(self.logger, LOG_DIR, LOG_PREFIX)
-        except Exception as e:
-            self.logger.warning(f"log file 설정 실패: {e}")
-        self._ensure_fault_dump()
+        self._set_log_dir(config)
 
         # 사용자 설정으로 기본 설정 업데이트
         if config:
@@ -240,6 +236,27 @@ class Matcher:
         self.logger.error(resmon.format_snapshot(resmon.snapshot(), f"{tag} hang"))
         self.logger.error(resmon.format_gpu_processes(resmon.gpu_processes()))
 
+    def _set_log_dir(self, config: Optional[Dict[str, Any]]) -> None:
+        """로그 파일 디렉터리 지정: config `log_dir` → 환경변수 MATCHING_LOG_DIR → 기본값.
+
+        init_config 로 config 가 바뀌어도 호출된다 — 디렉터리가 같으면 no-op, 다르면 파일 핸들러 교체.
+        """
+        log_dir = (config or {}).get("log_dir") or os.environ.get("MATCHING_LOG_DIR") or LOG_DIR_DEFAULT
+        log_dir = Path(log_dir).expanduser().resolve()
+        old = self._log_file_handler
+        if old is not None and old.log_dir == log_dir:
+            return
+        try:
+            new = add_daily_file_handler(self.logger, str(log_dir), LOG_PREFIX)
+        except Exception as e:
+            self.logger.warning(f"log file 설정 실패 ({log_dir}): {e}")
+            return
+        if old is not None:
+            self.logger.removeHandler(old)
+            old.close()
+        self._log_file_handler = new
+        self._ensure_fault_dump()
+
     def _ensure_fault_dump(self) -> None:
         """segfault/abort 시 파이썬 스택을 로그 파일(hood_matching_YYYYMMDD.log)에 직접 덤프.
 
@@ -277,6 +294,7 @@ class Matcher:
         if config:
             self.default_config.update(config)
         self.config = self.default_config
+        self._set_log_dir(self.config)
 
         self.template_param = template_param or None
         if self.config:
